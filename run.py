@@ -133,7 +133,7 @@ def model_train(freq_weighted):
                     if step_ii % 1 == 0:
                         print('Step %d: loss = %.2f (%.3f sec)' % (step_ii, batch_cost, duration))
 
-                    if (step_ii + 1) % 100 == 0:
+                    if (step_ii + 1) % 50 == 0:
                         checkpoint_name = 'checkpoints/%dlayer_%flr_model' % (Config.num_layers, Config.lr)
                         saver.save(session, checkpoint_name, global_step=step_ii + 1)
 

@@ -11,7 +11,9 @@ from util import *
 
 DATA_DIR = '../data'
 INPUT_DIR = os.path.join(DATA_DIR, 'raw_data')
-OUTPUT_DIR = os.path.join(DATA_DIR, 'tf_records')
+TRAIN_DIR = os.path.join(DATA_DIR, 'train')
+TEST_DIR = os.path.join(DATA_DIR, 'test')
+
 
 def _bytes_feature(value):
   return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
@@ -35,7 +37,13 @@ if __name__ == '__main__':
 			voice_spec = create_spectrogram_from_audio(voice)
 			mixed_spec = create_spectrogram_from_audio(mixed)
 
-			writer_filename = os.path.join(OUTPUT_DIR, '%s.tfrecords' % f[:-4])
+			output_dir = None
+			if i < 200:
+				output_dir = TRAIN_DIR
+			else:
+				output_dir = TEST_DIR
+
+			writer_filename = os.path.join(output_dir, '%s.tfrecords' % f[:-4])
 			# writer = tf.python_io.TFRecordWriter(writer_filename, options=tf.python_io.TFRecordOptions(tf.python_io.TFRecordCompressionType.ZLIB))
 			writer = tf.python_io.TFRecordWriter(writer_filename)
 

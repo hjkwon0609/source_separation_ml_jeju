@@ -31,6 +31,7 @@ class SeparationModel():
 
             # vector_product_matrix defined in util.py
             tf.summary.histogram(name + 'weight_histogram', W)
+            tf.summary.histogram(name + 'bias_histogram', b)
             return tf.nn.tanh(vector_product_matrix(X, W) + b)
 
     def add_prediction_op(self, input_spec):
@@ -54,8 +55,12 @@ class SeparationModel():
         tf.summary.scalar("loss", self.loss)
 
     def add_training_op(self):
-        optimizer = tf.train.AdamOptimizer(learning_rate=Config.lr).minimize(self.loss)        
-        self.optimizer = optimizer
+        optimizer = tf.train.AdamOptimizer(learning_rate=Config.lr)
+        grads = optimizer.compute_gradients(self.loss)
+        for grad, var in grads:
+            tf.summary.scalar('gradient_norm_%s' % (var), tf.norm(grad))
+        self.optimizer = optimizer.apply_gradients(grads)
+        tf.summary.scalar('learning_rate', self.optimizer._lr)
 
     def add_summary_op(self):
         self.merged_summary_op = tf.summary.merge_all()
