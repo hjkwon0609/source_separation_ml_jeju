@@ -26,7 +26,8 @@ import pickle
 
 import copy
 
-DATA_DIR = 'data/tf_records'
+TRAIN_DIR = 'data/train'
+TEST_DIR = 'data/test'
 
 # def create_batch(input_data, target_data, batch_size):
 #     input_batches = []
@@ -52,11 +53,11 @@ def read_and_decode(filename_queue):
     voice_spec = transform_spec_from_raw(features['voice_spec'])
     mixed_spec = transform_spec_from_raw(features['mixed_spec'])
 
-    stacked_song_spec = stack_spectrograms(song_spec)
-    stacked_voice_spec = stack_spectrograms(voice_spec)
+    # stacked_song_spec = stack_spectrograms(song_spec)
+    # stacked_voice_spec = stack_spectrograms(voice_spec)
     stacked_mixed_spec = stack_spectrograms(mixed_spec)  # this will be the input
 
-    target_spec = tf.concat([stacked_song_spec, stacked_voice_spec], axis=1) # axis=2  # target spec is going to be a concatenation of song_spec and voice_spec
+    target_spec = tf.concat([song_spec, voice_spec], axis=1) # axis=2  # target spec is going to be a concatenation of song_spec and voice_spec
 
     return stacked_mixed_spec, target_spec
 
@@ -83,7 +84,8 @@ def model_train(freq_weighted):
     logs_path = "tensorboard/" + strftime("%Y_%m_%d_%H_%M_%S", gmtime())
     
     with tf.Graph().as_default():
-        files = [os.path.join(DATA_DIR, f) for f in os.listdir(DATA_DIR) if f[-10:] == '.tfrecords']
+        files = [os.path.join(TRAIN_DIR, f) for f in os.listdir(TRAIN_DIR) if f[-10:] == '.tfrecords']
+        test_files = [os.path.join(TEST_DIR, f) for f in os.listdir(TEST_DIR) if f[-10:] == '.tfrecords']
         with tf.name_scope('input'):
             filename_queue = tf.train.string_input_producer(files, num_epochs=Config.num_epochs)
 
@@ -99,11 +101,15 @@ def model_train(freq_weighted):
         # init = tf.global_variables_initializer()
         init = tf.group(tf.initialize_all_variables(), tf.initialize_local_variables())
 
-        saver = tf.train.Saver(tf.trainable_variables())
+        saver = tf.train.Saver()
 
         with tf.Session() as session:
-            
-            session.run(init)
+            ckpt = tf.train.get_checkpoint_state('checkpoints/')
+            if ckpt:
+                print("Reading model parameters from %s" % ckpt.model_checkpoint_path)
+                saver.restore(session, ckpt.model_checkpoint_path)
+            else:
+                session.run(init)
 
             # if args.load_from_file is not None:
             #     new_saver = tf.train.import_meta_graph('%s.meta' % args.load_from_file, clear_devices=True)

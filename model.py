@@ -41,10 +41,22 @@ class SeparationModel():
             layer_name = 'hidden%d' % (i + 1)
             curr = self.create_layer(layer_name, curr, Config.num_hidden)
 
-        self.output = self.create_layer('output', curr, Config.output_size)
+        output = self.create_layer('output', curr, Config.output_size)
+        curr_frame = output[:,:,:,1]
+
+        # soft masking
+        song_out, voice_out = tf.split(curr_frame, [Config.num_freq_bins, Config.num_freq_bins], 2)
+        song_mask = tf.abs(song_out) / (tf.abs(song_out) + tf.abs(voice_out))
+        voice_mask = 1 - song_mask
+
+        input_spec_curr = input_spec[:,:,:,1]  # current frame of input spec
+        song_output = tf.multiply(input_spec_curr, song_mask)
+        voice_output = tf.multiply(input_spec_curr, voice_mask)
+
+        self.output = tf.concat([song_output, voice_output], axis=2)
 
     def add_loss_op(self, target):
-        delta = self.output - target
+        delta = self.output - target  # only compare the current frame
         squared_error = tf.norm(delta, ord=2)
 
         l2_cost = tf.reduce_sum([tf.norm(v) for v in tf.trainable_variables() if len(v.get_shape().as_list()) == 3])
@@ -60,7 +72,7 @@ class SeparationModel():
         for grad, var in grads:
             tf.summary.scalar('gradient_norm_%s' % (var), tf.norm(grad))
         self.optimizer = optimizer.apply_gradients(grads)
-        tf.summary.scalar('learning_rate', self.optimizer._lr)
+        tf.summary.scalar('learning_rate', optimizer._lr)
 
     def add_summary_op(self):
         self.merged_summary_op = tf.summary.merge_all()
