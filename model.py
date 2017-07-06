@@ -29,10 +29,12 @@ class SeparationModel():
             W = tf.get_variable(name + 'W', shape=[X.get_shape()[2], output_len, 3], initializer=xavier, dtype=tf.float32)
             b = tf.get_variable(name + 'b', shape=[output_len, 3], dtype=tf.float32)
 
-            # vector_product_matrix defined in util.py
             tf.summary.histogram(name + 'weight_histogram', W)
             tf.summary.histogram(name + 'bias_histogram', b)
+
+            # vector_product_matrix defined in util.py
             return tf.nn.tanh(vector_product_matrix(X, W) + b)
+
 
     def add_prediction_op(self, input_spec):
         curr = input_spec
@@ -55,6 +57,7 @@ class SeparationModel():
 
         self.output = tf.concat([song_output, voice_output], axis=2)
 
+
     def add_loss_op(self, target):
         delta = self.output - target  # only compare the current frame
         squared_error = tf.norm(delta, ord=2)
@@ -66,16 +69,19 @@ class SeparationModel():
         tf.summary.scalar("squared_error", squared_error)
         tf.summary.scalar("loss", self.loss)
 
+
     def add_training_op(self):
-        optimizer = tf.train.AdamOptimizer(learning_rate=Config.lr)
+        optimizer = tf.train.AdamOptimizer(learning_rate=Config.lr, beta1=Config.beta1, beta2=Config.beta2)
+        # optimizer = tf.train.GradientDescentOptimizer(learning_rate=Config.lr)
         grads = optimizer.compute_gradients(self.loss)
         for grad, var in grads:
-            tf.summary.scalar('gradient_norm_%s' % (var), tf.norm(grad))
+            tf.summary.histogram('gradient_norm_%s' % (var), grad)
         self.optimizer = optimizer.apply_gradients(grads)
-        tf.summary.scalar('learning_rate', optimizer._lr)
+
 
     def add_summary_op(self):
         self.merged_summary_op = tf.summary.merge_all()
+
 
     def train_on_batch(self, train_inputs_batch, train_targets_batch):
         self.add_prediction_op(train_inputs_batch)

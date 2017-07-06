@@ -8,12 +8,14 @@ class Config:
     num_freq_bins = 514
     num_time_frames = 5169
 
-    batch_size = 20
+    batch_size = 10
     output_size = num_freq_bins * 2
-    num_hidden = 512
+    num_hidden = 1024
 
     num_layers = 3
 
     num_epochs = 50
     l2_lambda = 0.01
-    lr = 1e-2
+    lr = 0.05
+    beta1 = 0.5
+    beta2 = 0.4
