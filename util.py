@@ -28,17 +28,17 @@ def create_audio_from_spectrogram(spec):
 ##  Vector Product Functions
 ############################################################################
 
-def tf_broadcast_matrix_mult(a, b):
-	'''
-	a is 3-d and b is 2-d
-	'''
-	orig_shape = a.get_shape().as_list()
-	a_ = tf.reshape(a, [-1, orig_shape[-1]])
-	mul = tf.matmul(a_, b)
-	new_shape = orig_shape[:-1] + b.get_shape().as_list()[-1:]
-	return tf.reshape(mul, new_shape)
+# def tf_broadcast_matrix_mult(a, b):
+# 	'''
+# 	a is 3-d and b is 2-d
+# 	'''
+# 	orig_shape = a.get_shape().as_list()
+# 	a_ = tf.reshape(a, [-1, orig_shape[-1]])
+# 	mul = tf.matmul(a_, b)
+# 	new_shape = orig_shape[:-1] + b.get_shape().as_list()[-1:]
+# 	return tf.reshape(mul, new_shape)
 
 def vector_product_matrix(X, W):
-	return tf.transpose([tf_broadcast_matrix_mult(X[:,:,:,1], W[:,:,2]) - tf_broadcast_matrix_mult(X[:,:,:,2], W[:,:,1]),
-		tf_broadcast_matrix_mult(X[:,:,:,2], W[:,:,0]) - tf_broadcast_matrix_mult(X[:,:,:,0], W[:,:,2]),
-		tf_broadcast_matrix_mult(X[:,:,:,0], W[:,:,1]) - tf_broadcast_matrix_mult(X[:,:,:,1], W[:,:,0])], (1, 2, 3, 0))
+	return tf.transpose([tf.matmul(X[:,:,1], W[:,:,2]) - tf.matmul(X[:,:,2], W[:,:,1]),
+		tf.matmul(X[:,:,2], W[:,:,0]) - tf.matmul(X[:,:,0], W[:,:,2]),
+		tf.matmul(X[:,:,0], W[:,:,1]) - tf.matmul(X[:,:,1], W[:,:,0])], (1, 2, 0))

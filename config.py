@@ -16,6 +16,6 @@ class Config:
 
     num_epochs = 50
     l2_lambda = 0.01
-    lr = 0.05
-    beta1 = 0.5
-    beta2 = 0.4
+    lr = 0.001
+    beta1 = 0.9
+    beta2 = 0.999

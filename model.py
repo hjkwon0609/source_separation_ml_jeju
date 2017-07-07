@@ -22,52 +22,82 @@ from config import Config
 
 class SeparationModel():
 
-    def create_layer(self, name, X, output_len):
+    def create_layer(self, name, X, output_len, activation_fn=None):
         xavier = tf.contrib.layers.xavier_initializer()
 
         with tf.name_scope(name):
-            W = tf.get_variable(name + 'W', shape=[X.get_shape()[2], output_len, 3], initializer=xavier, dtype=tf.float32)
+            W = tf.get_variable(name + 'W', shape=[X.get_shape()[1], output_len, 3], initializer=xavier, dtype=tf.float32)
             b = tf.get_variable(name + 'b', shape=[output_len, 3], dtype=tf.float32)
 
             tf.summary.histogram(name + 'weight_histogram', W)
             tf.summary.histogram(name + 'bias_histogram', b)
 
             # vector_product_matrix defined in util.py
-            return tf.nn.tanh(vector_product_matrix(X, W) + b)
+            output = vector_product_matrix(X, W) + b
+            if activation_fn:
+                output = activation_fn(output)
+            tf.summary.histogram(name + 'output', output)
+
+            return output
 
 
     def add_prediction_op(self, input_spec):
         curr = input_spec
+
+        # normalize input to network
+        mean, var = tf.nn.moments(input_spec, shift=1e-6, axes=[0], keep_dims=True)  # shift for numerical stability
+
+        curr -= mean
+        curr /= tf.sqrt(var)
         
         for i in xrange(Config.num_layers):
             layer_name = 'hidden%d' % (i + 1)
-            curr = self.create_layer(layer_name, curr, Config.num_hidden)
+            activation_fn = tf.nn.tanh if i < Config.num_layers - 1 else tf.nn.relu
+            curr = self.create_layer(layer_name, curr, Config.num_hidden, activation_fn)
 
         output = self.create_layer('output', curr, Config.output_size)
-        curr_frame = output[:,:,:,1]
+        curr_frame = output[:,:,1]
+        self.output = curr_frame
 
         # soft masking
-        song_out, voice_out = tf.split(curr_frame, [Config.num_freq_bins, Config.num_freq_bins], 2)
+        song_out, voice_out = tf.split(curr_frame, [Config.num_freq_bins, Config.num_freq_bins], axis=1)
         song_mask = tf.abs(song_out) / (tf.abs(song_out) + tf.abs(voice_out))
         voice_mask = 1 - song_mask
 
-        input_spec_curr = input_spec[:,:,:,1]  # current frame of input spec
+        input_spec_curr = input_spec[:,:,1]  # current frame of input spec
         song_output = tf.multiply(input_spec_curr, song_mask)
         voice_output = tf.multiply(input_spec_curr, voice_mask)
 
-        self.output = tf.concat([song_output, voice_output], axis=2)
+        tf.summary.histogram('song_output', song_output)
+        tf.summary.histogram('voice_output', voice_output)
+
+        self.masked_output = tf.concat([song_output, voice_output], axis=1)
 
 
     def add_loss_op(self, target):
-        delta = self.output - target  # only compare the current frame
+        mean, var = tf.nn.moments(target, shift=1e-6, axes=[0], keep_dims=True)  # shift for numerical stability
+        normalized_target = target - mean
+        normalized_target /= tf.sqrt(var)
+
+        delta = self.output - normalized_target  # only compare the current frame
         squared_error = tf.norm(delta, ord=2)
+        mean_error = squared_error / self.output.get_shape().as_list()[0]
 
         l2_cost = tf.reduce_sum([tf.norm(v) for v in tf.trainable_variables() if len(v.get_shape().as_list()) == 3])
 
-        self.loss = Config.l2_lambda * l2_cost + squared_error
+        self.loss = Config.l2_lambda * l2_cost + mean_error
 
-        tf.summary.scalar("squared_error", squared_error)
+        tf.summary.scalar("squared_error", mean_error)
         tf.summary.scalar("loss", self.loss)
+
+        song_target, voice_target = tf.split(target, [Config.num_freq_bins, Config.num_freq_bins], axis=1)
+        tf.summary.histogram('song_target', song_target)
+        tf.summary.histogram('voice_target', voice_target)
+        tf.summary.histogram('target', target)
+
+        masked_loss = self.masked_output * (tf.norm(target, ord=2) / tf.norm(self.masked_output, ord=2)) - target
+        self.masked_loss = tf.norm(masked_loss, ord=2) / self.output.get_shape().as_list()[0]
+        tf.summary.scalar('masked_loss', self.masked_loss)
 
 
     def add_training_op(self):
@@ -83,7 +113,7 @@ class SeparationModel():
         self.merged_summary_op = tf.summary.merge_all()
 
 
-    def train_on_batch(self, train_inputs_batch, train_targets_batch):
+    def run_on_batch(self, train_inputs_batch, train_targets_batch):
         self.add_prediction_op(train_inputs_batch)
         self.add_loss_op(train_targets_batch)
         self.add_training_op()

@@ -80,64 +80,82 @@ def stack_spectrograms(spec):
     return tf.slice(stacked, [1, 0, 0], [Config.num_time_frames, -1, -1]) # get rid of padding
     # return tf.slice(stacked, [0, 1, 0], [-1, Config.num_time_frames, -1]) # get rid of padding
 
+
+def prepare_data(train):
+    data_dir = TRAIN_DIR if train else TEST_DIR
+    files = [os.path.join(TRAIN_DIR, f) for f in os.listdir(data_dir) if f[-10:] == '.tfrecords']
+
+    with tf.name_scope('input'):
+        num_epochs = Config.num_epochs if train else 1
+        batch_size = Config.batch_size if train else 1
+
+        filename_queue = tf.train.string_input_producer(files, num_epochs=num_epochs)
+
+        input_spec, target_spec = read_and_decode(filename_queue)
+
+        input_specs, target_specs = tf.train.batch(
+            [input_spec, target_spec], batch_size=batch_size, num_threads=2,
+            capacity= 2 + 3 * batch_size)
+
+    return input_specs, target_specs
+
 def model_train(freq_weighted):
     logs_path = "tensorboard/" + strftime("%Y_%m_%d_%H_%M_%S", gmtime())
     
     with tf.Graph().as_default():
-        files = [os.path.join(TRAIN_DIR, f) for f in os.listdir(TRAIN_DIR) if f[-10:] == '.tfrecords']
-        test_files = [os.path.join(TEST_DIR, f) for f in os.listdir(TEST_DIR) if f[-10:] == '.tfrecords']
-        with tf.name_scope('input'):
-            filename_queue = tf.train.string_input_producer(files, num_epochs=Config.num_epochs)
-
-            train_input, train_target = read_and_decode(filename_queue)
-
-            train_inputs, train_targets = tf.train.batch(
-                [train_input, train_target], batch_size=Config.batch_size, num_threads=2,
-                capacity= 2 + 3 * Config.batch_size)
+        
+        train_inputs, train_targets = prepare_data(True)
         
         model = SeparationModel(freq_weighted=False)  # don't use freq_weighted for now
-        model.train_on_batch(train_inputs, train_targets)
+
+        # reshape so each frame becomes one example, instead of each song being an example
+        # input: [num_batch, num_frames, freq_bins, 3] ==> [num_batch * num_frames, freq_bins, 3]
+        # target: [num_batch, num_frames, freq_bins] ==> [num_batch * num_frames, freq_bins]
+        input_shape = train_inputs.get_shape().as_list()
+        train_inputs = tf.reshape(train_inputs, [-1, input_shape[2], input_shape[3]])
+        target_shape = train_targets.get_shape().as_list()
+        train_targets = tf.reshape(train_targets, [-1, target_shape[2]])        
+
+        model.run_on_batch(train_inputs, train_targets)
         
-        # init = tf.global_variables_initializer()
         init = tf.group(tf.initialize_all_variables(), tf.initialize_local_variables())
 
         saver = tf.train.Saver()
+
+
         with tf.Session() as session:
             ckpt = tf.train.get_checkpoint_state('checkpoints/')
+            step_ii = 0
             if ckpt:
                 print("Reading model parameters from %s" % ckpt.model_checkpoint_path)
-                saver.restore(session, ckpt.model_checkpoint_path)
                 session.run(tf.initialize_local_variables())
+                saver.restore(session, ckpt.model_checkpoint_path)
             else:
                 session.run(init)
-
-            # if args.load_from_file is not None:
-            #     new_saver = tf.train.import_meta_graph('%s.meta' % args.load_from_file, clear_devices=True)
-            #     new_saver.restore(session, args.load_from_file)
 
             train_writer = tf.summary.FileWriter(logs_path + '/train', session.graph)
             global_start = time.time()
             
             coord = tf.train.Coordinator()
             threads = tf.train.start_queue_runners(sess=session, coord=coord)
-            total_train_cost = 0
+            # total_train_cost = 0
 
             try:
-                step_ii = 0
+                
                 while not coord.should_stop():
                     start = time.time()
 
-                    curr_batch_size = train_inputs.get_shape().as_list()[0]
-                    output, batch_cost, summary, optimizer = session.run([model.output, model.loss, model.merged_summary_op, model.optimizer])
                     
-                    total_train_cost += batch_cost * curr_batch_size
+                    output, batch_cost, masked_cost, summary, optimizer = session.run([model.output, model.loss, model.masked_loss, model.merged_summary_op, model.optimizer])
+                    
+                    # total_train_cost += batch_cost * curr_batch_size
                     train_writer.add_summary(summary, step_ii)
 
                     step_ii += 1
                     duration = time.time() - start
 
                     if step_ii % 1 == 0:
-                        print('Step %d: loss = %.2f (%.3f sec)' % (step_ii, batch_cost, duration))
+                        print('Step %d: loss = %.2f masked_loss = %.2f (%.3f sec)' % (step_ii, batch_cost, masked_cost, duration))
 
                     if (step_ii + 1) % 100 == 0:
                         checkpoint_name = 'checkpoints/%dlayer_%flr_model' % (Config.num_layers, Config.lr)
@@ -151,66 +169,61 @@ def model_train(freq_weighted):
             coord.join(threads)
 
 
-            # for curr_epoch in range(Config.num_epochs):
-            #     total_train_cost = 0
-            #     total_train_examples = 0
-
-            #     start = time.time()
-
-            #     for batch in random.sample(range(num_batches_per_epoch), num_batches_per_epoch):
-            #         cur_batch_size = len(train_target_batch[batch])
-            #         total_train_examples += cur_batch_size
-
-            #         _, batch_cost, summary = model.train_on_batch(session, 
-            #                                                 train_input_batch[batch],
-            #                                                 train_target_batch[batch], 
-            #                                                 train=True)
-
-            #         total_train_cost += batch_cost * cur_batch_size
-            #         train_writer.add_summary(summary, step_ii)
-
-            #         step_ii += 1
-
-            #     train_cost = total_train_cost / total_train_examples
-
-            #     num_dev_batches = len(dev_target_batch)
-            #     total_batch_cost = 0
-            #     total_batch_examples = 0
-
-            #     # val_batch_cost, _ = model.train_on_batch(session, dev_input_batch[0], dev_target_batch[0], train=False)
-            #     for batch in random.sample(range(num_dev_batches_per_epoch), num_dev_batches_per_epoch):
-            #         cur_batch_size = len(dev_target_batch[batch])
-            #         total_batch_examples += cur_batch_size
-
-            #         _, _val_batch_cost, _ = model.train_on_batch(session, dev_input_batch[batch], dev_target_batch[batch], train=False)
-
-            #         total_batch_cost += cur_batch_size * _val_batch_cost
-
-
-            #     val_batch_cost = None
-            #     try:
-            #         val_batch_cost = total_batch_cost / total_batch_examples
-            #     except ZeroDivisionError:
-            #         val_batch_cost = 0
-
-            #     log = "Epoch {}/{}, train_cost = {:.3f}, val_cost = {:.3f}, time = {:.3f}"
-            #     print(
-            #     log.format(curr_epoch + 1, Config.num_epochs, train_cost, val_batch_cost, time.time() - start))
-
-            #     # if args.print_every is not None and (curr_epoch + 1) % args.print_every == 0:
-            #     #     batch_ii = 0
-            #     #     model.print_results(train_feature_minibatches[batch_ii], train_labels_minibatches[batch_ii])
-
-            #     if (curr_epoch + 1) % 10 == 0:
-            #         checkpoint_name = 'checkpoints/%dlayer_%flr_model' % (Config.num_layers, Config.lr)
-            #         if freq_weighted:
-            #             checkpoint_name = checkpoint_name + '_freq_weighted'
-            #         saver.save(session, checkpoint_name, global_step=curr_epoch + 1)
-
-
 def model_test(test_input):
 
-    test_rate, test_audio = wavfile.read(test_input)
+    sample_rate, sample_audio = wavfile.read('data/raw_data/10161_chorus.wav')
+    sample_spectrogram = create_spectrogram_from_audio(sample_audio)  # saves spectrogram setting for ispectrogram later
+
+    with tf.Graph().as_default():
+        train_inputs, train_targets = prepare_data(False)
+            
+        model = SeparationModel(freq_weighted=False)  # don't use freq_weighted for now
+        model.run_on_batch(train_inputs, train_targets)
+        
+        init = tf.group(tf.initialize_all_variables(), tf.initialize_local_variables())
+
+        saver = tf.train.Saver()
+
+        with tf.Session() as session:
+            ckpt = tf.train.get_checkpoint_state('checkpoints/')
+            if ckpt:
+                print("Reading model parameters from %s" % ckpt.model_checkpoint_path)
+                saver.restore(session, ckpt.model_checkpoint_path)
+                session.run(tf.initialize_local_variables())
+            else:
+                session.run(init)
+            global_start = time.time()
+            
+            coord = tf.train.Coordinator()
+            threads = tf.train.start_queue_runners(sess=session, coord=coord)
+            total_train_cost = 0
+
+            try:
+                step_ii = 0
+                while not coord.should_stop():
+                    start = time.time()
+
+                    print(train_inputs.eval())
+                    output, batch_cost, summary, optimizer = session.run([model.output, model.loss, model.merged_summary_op, model.optimizer])
+                    print(train_inputs.eval())
+                    assert(False)
+                    
+                    total_train_cost += batch_cost * curr_batch_size
+
+                    step_ii += 1
+                    duration = time.time() - start
+
+                    if step_ii % 1 == 0:
+                        print('Step %d: loss = %.2f (%.3f sec)' % (step_ii, batch_cost, duration))
+
+            except tf.errors.OutOfRangeError:
+                pass
+            finally:
+                coord.request_stop()
+
+            coord.join(threads)
+
+    
     clean_rate, clean_audio = wavfile.read(CLEAN_FILE)
     noise_rate, noise_audio = wavfile.read(NOISE_FILE)
 
