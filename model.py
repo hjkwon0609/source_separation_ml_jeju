@@ -47,7 +47,7 @@ class SeparationModel():
 
     def add_prediction_op(self, input_spec):
         curr = tf.real(input_spec)  # use real component for training
-        
+
         for i in xrange(Config.num_layers):
             layer_name = 'hidden%d' % (i + 1)
             activation_fn = tf.nn.tanh if i < Config.num_layers - 1 else tf.nn.relu
@@ -107,7 +107,7 @@ class SeparationModel():
         grads = optimizer.compute_gradients(self.loss)
         for grad, var in grads:
             tf.summary.histogram('gradient_norm_%s' % (var), grad)
-        self.optimizer = optimizer.apply_gradients(grads)
+        self.optimizer = optimizer.apply_gradients(grads, global_step=self.global_step)
 
 
     def add_summary_op(self):
@@ -115,6 +115,8 @@ class SeparationModel():
 
 
     def run_on_batch(self, train_inputs_batch, train_targets_batch):
+        self.global_step = tf.Variable(0, dtype=tf.int32, trainable=False, name='global_step')
+        
         self.add_prediction_op(train_inputs_batch)
         self.add_loss_op(train_targets_batch)
         self.add_training_op()

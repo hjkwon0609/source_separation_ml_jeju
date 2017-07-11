@@ -91,7 +91,7 @@ def prepare_data(train):
     files = [os.path.join(data_dir, f) for f in filename]
     # if not train:
     #     files = files[:5]
-
+    
     # normalize data
     stats = np.load(os.path.join(PREPROCESSING_STAT_DIR, 'stats.npy'))
 
@@ -119,14 +119,13 @@ def prepare_data(train):
     return input_specs, target_specs, stats  # return stats for loss calculation later
 
 def model_train(freq_weighted):
-    logs_path = "tensorboard/" + strftime("%Y_%m_%d_%H_%M_%S", gmtime()) + 'small_vpn_lr%f' % (Config.lr) 
+    logs_path = "tensorboard/" + strftime("%Y_%m_%d_%H_%M_%S", gmtime()) + 'small_vpnn_lr%f' % (Config.lr) 
     
     with tf.Graph().as_default():
         
         train_inputs, train_targets, stats = prepare_data(True)
         model = SeparationModel(freq_weighted=False)  # don't use freq_weighted for now
         model.run_on_batch(train_inputs, train_targets)
-        global_step = tf.Variable(0, dtype=tf.int32, trainable=False, name='global_step')
         
         init = tf.group(tf.initialize_all_variables(), tf.initialize_local_variables())
         saver = tf.train.Saver()
@@ -149,29 +148,27 @@ def model_train(freq_weighted):
             # total_train_cost = 0
 
             print('num trainable parameters: %s' % (np.sum([np.prod(v.get_shape().as_list()) for v in tf.trainable_variables()])))
+            step_ii = 0
 
             try:
                 
                 while not coord.should_stop():
                     start = time.time()
-                    global_step += 1
-                    step_ii = global_step.eval()
+                    step_ii += 1
                     
                     output, batch_cost, summary, optimizer = session.run([model.output, model.loss, model.merged_summary_op, model.optimizer])
                     
                     # total_train_cost += batch_cost * curr_batch_size
                     train_writer.add_summary(summary, step_ii)
 
-                    
-
                     duration = time.time() - start
 
                     if step_ii % 1 == 0:
                         print('Step %d: loss = %.5f (%.3f sec)' % (step_ii, batch_cost, duration))
 
-                    if (step_ii + 1) % 100 == 0:
+                    if step_ii % 100 == 0:
                         checkpoint_name = 'checkpoints/small_vpnn%dlayer_%flr_model' % (Config.num_layers, Config.lr)
-                        saver.save(session, checkpoint_name, global_step=step_ii + 1)
+                        saver.save(session, checkpoint_name, global_step=model.global_step)
 
             except tf.errors.OutOfRangeError:
                 print('Done Training for %d epochs, %d steps' % (Config.num_epochs, step_ii))
