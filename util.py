@@ -8,12 +8,11 @@ from config import Config
 ##  Spectrogram util functions
 ############################################################################
 
-CONST = 10000  # prevent input values from being too large
 setting = None
 
 def create_spectrogram_from_audio(data):
 	global setting
-	spectrogram = stft.spectrogram(data, framelength=512, window=hamming).transpose() / CONST
+	spectrogram = stft.spectrogram(data, framelength=512, window=hamming).transpose()
 	setting = spectrogram.stft_settings  # setting is going to be same for all spectrograms
 	spectrogram = np.asarray(spectrogram)
 	
@@ -30,7 +29,6 @@ def create_audio_from_spectrogram(spec):
 
 	spec_transposed = tf.transpose(spec)
 	transformed = stft.types.SpectrogramArray(spec_transposed.eval(), stft_settings=setting)
-	transformed *= CONST
 	
 	return stft.ispectrogram(transformed)
 

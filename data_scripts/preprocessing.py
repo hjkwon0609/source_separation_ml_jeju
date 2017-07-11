@@ -14,11 +14,18 @@ INPUT_DIR = os.path.join(DATA_DIR, 'raw_data')
 TRAIN_DIR = os.path.join(DATA_DIR, 'train')
 TEST_DIR = os.path.join(DATA_DIR, 'test')
 
+PREPROCESSING_STAT_DIR = os.path.join(DATA_DIR, 'preprocessing_stat')
+TRAINING_DATA = 200
+
 
 def _bytes_feature(value):
   return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
 
 if __name__ == '__main__':
+
+	song_specs = None
+	voice_specs = None
+	mixed_specs = None
 
 	for i, f in enumerate(os.listdir(INPUT_DIR)):
 		if f[-4:] == '.wav':
@@ -33,18 +40,24 @@ if __name__ == '__main__':
 
 			mixed = song / 2 + voice / 2
 
-			song_spec = create_spectrogram_from_audio(song)
-			voice_spec = create_spectrogram_from_audio(voice)
-			mixed_spec = create_spectrogram_from_audio(mixed)
+			song_spec, voice_spec, mixed_spec = create_spectrogram_from_audio(song), \
+												create_spectrogram_from_audio(voice), \
+												create_spectrogram_from_audio(mixed)
+
+			if song_specs is None:
+				song_specs, voice_specs, mixed_specs = np.real(song_spec), np.real(voice_spec), np.real(mixed_spec)
+			elif i < TRAINING_DATA:
+				song_specs, voice_specs, mixed_specs = np.concatenate((song_specs,np.real(song_spec))), \
+														np.concatenate((voice_specs,np.real(voice_spec))), \
+														np.concatenate((mixed_specs,np.real(mixed_spec)))
 
 			output_dir = None
-			if i < 200:
+			if i < TRAINING_DATA:
 				output_dir = TRAIN_DIR
 			else:
 				output_dir = TEST_DIR
 
 			writer_filename = os.path.join(output_dir, '%s.tfrecords' % f[:-4])
-			# writer = tf.python_io.TFRecordWriter(writer_filename, options=tf.python_io.TFRecordOptions(tf.python_io.TFRecordCompressionType.ZLIB))
 			writer = tf.python_io.TFRecordWriter(writer_filename)
 
 			example = tf.train.Example(features=tf.train.Features(feature={
@@ -56,7 +69,9 @@ if __name__ == '__main__':
 			writer.write(example.SerializeToString())
 			writer.close()
 
-	# print processed_data, procesed_data.shape
+	np.save(os.path.join(PREPROCESSING_STAT_DIR, 'stats'),
+		[np.mean(mixed_specs), np.var(mixed_specs), np.mean(song_specs), np.var(song_specs), np.mean(voice_specs), np.var(voice_specs)])
+
 
 
 

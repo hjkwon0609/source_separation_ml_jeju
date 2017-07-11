@@ -47,26 +47,25 @@ class SeparationModel():
 
     def add_prediction_op(self, input_spec):
         curr = tf.real(input_spec)  # use real component for training
-
-        # normalize input to network
-        mean, var = tf.nn.moments(curr, shift=1e-10, axes=[0], keep_dims=True)  # shift for numerical stability
-
-        curr -= mean
-        curr /= tf.sqrt(var)
         
         for i in xrange(Config.num_layers):
             layer_name = 'hidden%d' % (i + 1)
             activation_fn = tf.nn.tanh if i < Config.num_layers - 1 else tf.nn.relu
             curr = self.create_layer(layer_name, curr, Config.num_hidden, activation_fn)
 
-        output = self.create_layer('output', curr, Config.output_size)
-        curr_frame = output[:,:,1]
+        song_out = self.create_layer('output_song', curr, Config.num_freq_bins)
+        voice_out = self.create_layer('output_voice', curr, Config.num_freq_bins)
+
+        song_out, voice_out = song_out[:,:,1], voice_out[:,:,1]
+
+        curr_frame = tf.concat([song_out, voice_out], axis=1)
         # curr_frame = output
         self.output = curr_frame
 
         # hard masking
-        song_out, voice_out = tf.split(curr_frame, [Config.num_freq_bins, Config.num_freq_bins], axis=1)
-        song_mask = tf.cast(tf.greater(tf.abs(song_out), tf.abs(voice_out)), tf.int32)  #tf.abs(song_out)  (tf.abs(song_out) + tf.abs(voice_out))
+        # song_mask = tf.cast(tf.greater(tf.abs(song_out), tf.abs(voice_out)), tf.int32)  #tf.abs(song_out)  (tf.abs(song_out) + tf.abs(voice_out))
+        # soft masking
+        song_mask = tf.abs(song_out) / (tf.abs(song_out) + tf.abs(voice_out))
         voice_mask = 1 - song_mask
 
         input_spec_curr = input_spec[:,:,1]  # current frame of input spec
@@ -80,15 +79,11 @@ class SeparationModel():
 
 
     def add_loss_op(self, target):
-        normalized_target = tf.real(target)
+        real_target = tf.real(target)
 
-        mean, var = tf.nn.moments(target, shift=1e-10, axes=[0], keep_dims=True)  # shift for numerical stability
-        normalized_target = normalized_target - mean
-        normalized_target /= tf.sqrt(var)
-
-        delta = self.output - normalized_target  # only compare the current frame
+        delta = self.output - real_target  # only compare the current frame
         # squared_error = tf.norm(delta, ord=2)
-        squared_error = tf.reduce_sum(tf.pow(delta, 2)) # l2 norm
+        squared_error = tf.reduce_sum(tf.pow(delta, 2)) 
         mean_error = squared_error / self.output.get_shape().as_list()[0]
 
         l2_cost = tf.reduce_sum([tf.norm(v) for v in tf.trainable_variables() if len(v.get_shape().as_list()) == 3])
@@ -99,10 +94,7 @@ class SeparationModel():
         tf.summary.scalar("squared_error", mean_error)
         tf.summary.scalar("loss", self.loss)
 
-        song_target, voice_target = tf.split(target, [Config.num_freq_bins, Config.num_freq_bins], axis=1)
-        tf.summary.histogram('song_target', song_target)
-        tf.summary.histogram('voice_target', voice_target)
-        tf.summary.histogram('target', target)
+        # song_target, voice_target = tf.split(target, [Config.num_freq_bins, Config.num_freq_bins], axis=1)
 
         # masked_loss = self.masked_output * (tf.norm(target, ord=2) / tf.norm(self.masked_output, ord=2)) - target
         # self.masked_loss = tf.norm(masked_loss, ord=2) / self.output.get_shape().as_list()[0]
