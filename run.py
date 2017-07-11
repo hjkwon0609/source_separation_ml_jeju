@@ -57,8 +57,9 @@ def read_and_decode(filename_queue):
     # stacked_voice_spec = stack_spectrograms(voice_spec)
     stacked_mixed_spec = stack_spectrograms(mixed_spec)  # this will be the input
 
-    target_spec = tf.concat([song_spec, voice_spec], axis=1) # axis=2  # target spec is going to be a concatenation of song_spec and voice_spec
+    target_spec = tf.real(tf.concat([song_spec, voice_spec], axis=1)) # axis=2  # target spec is going to be a concatenation of song_spec and voice_spec
 
+    # return mixed_spec, target_spec
     return stacked_mixed_spec, target_spec
 
 def transform_spec_from_raw(raw):
@@ -66,8 +67,11 @@ def transform_spec_from_raw(raw):
     Read raw features from TFRecords and shape them into spectrograms
     '''
     spec = tf.decode_raw(raw, tf.float32)
-    spec.set_shape([Config.num_time_frames * Config.num_freq_bins])
-    return tf.reshape(spec, [Config.num_time_frames, Config.num_freq_bins])
+    spec.set_shape([Config.num_time_frames * Config.num_freq_bins * 2])
+    spec = tf.reshape(spec, [Config.num_time_frames, Config.num_freq_bins * 2])
+    real, imag = tf.split(spec, [Config.num_freq_bins, Config.num_freq_bins], axis=1)
+    orig_spec = tf.complex(real, imag)
+    return orig_spec  # just use magnitude (ignore phase) for training mask
 
 def stack_spectrograms(spec):
     '''
@@ -83,7 +87,10 @@ def stack_spectrograms(spec):
 
 def prepare_data(train):
     data_dir = TRAIN_DIR if train else TEST_DIR
-    files = [os.path.join(TRAIN_DIR, f) for f in os.listdir(data_dir) if f[-10:] == '.tfrecords']
+    # data_dir = TRAIN_DIR
+    files = [os.path.join(data_dir, f) for f in os.listdir(data_dir) if f[-10:] == '.tfrecords']
+    if not train:
+        files = files[:5]
 
     with tf.name_scope('input'):
         num_epochs = Config.num_epochs if train else 1
@@ -94,8 +101,8 @@ def prepare_data(train):
         input_spec, target_spec = read_and_decode(filename_queue)
 
         input_specs, target_specs = tf.train.batch(
-            [input_spec, target_spec], batch_size=batch_size, num_threads=2,
-            capacity= 2 + 3 * batch_size)
+        [input_spec, target_spec], batch_size=batch_size, num_threads=2,
+        capacity= 2 + 3 * batch_size)
 
     return input_specs, target_specs
 
@@ -113,6 +120,7 @@ def model_train(freq_weighted):
         # target: [num_batch, num_frames, freq_bins] ==> [num_batch * num_frames, freq_bins]
         input_shape = train_inputs.get_shape().as_list()
         train_inputs = tf.reshape(train_inputs, [-1, input_shape[2], input_shape[3]])
+        # train_inputs = tf.reshape(train_inputs, [-1, input_shape[2]])
         target_shape = train_targets.get_shape().as_list()
         train_targets = tf.reshape(train_targets, [-1, target_shape[2]])        
 
@@ -144,9 +152,8 @@ def model_train(freq_weighted):
                 
                 while not coord.should_stop():
                     start = time.time()
-
                     
-                    output, batch_cost, masked_cost, summary, optimizer = session.run([model.output, model.loss, model.masked_loss, model.merged_summary_op, model.optimizer])
+                    output, batch_cost, summary, optimizer = session.run([model.output, model.loss, model.merged_summary_op, model.optimizer])
                     
                     # total_train_cost += batch_cost * curr_batch_size
                     train_writer.add_summary(summary, step_ii)
@@ -155,10 +162,10 @@ def model_train(freq_weighted):
                     duration = time.time() - start
 
                     if step_ii % 1 == 0:
-                        print('Step %d: loss = %.2f masked_loss = %.2f (%.3f sec)' % (step_ii, batch_cost, masked_cost, duration))
+                        print('Step %d: loss = %.5f (%.3f sec)' % (step_ii, batch_cost, duration))
 
                     if (step_ii + 1) % 100 == 0:
-                        checkpoint_name = 'checkpoints/%dlayer_%flr_model' % (Config.num_layers, Config.lr)
+                        checkpoint_name = 'checkpoints/vpnn%dlayer_%flr_model' % (Config.num_layers, Config.lr)
                         saver.save(session, checkpoint_name, global_step=step_ii + 1)
 
             except tf.errors.OutOfRangeError:
@@ -169,7 +176,7 @@ def model_train(freq_weighted):
             coord.join(threads)
 
 
-def model_test(test_input):
+def model_test():
 
     sample_rate, sample_audio = wavfile.read('data/raw_data/10161_chorus.wav')
     sample_spectrogram = create_spectrogram_from_audio(sample_audio)  # saves spectrogram setting for ispectrogram later
@@ -178,10 +185,19 @@ def model_test(test_input):
         train_inputs, train_targets = prepare_data(False)
             
         model = SeparationModel(freq_weighted=False)  # don't use freq_weighted for now
+
+        # reshape so each frame becomes one example, instead of each song being an example
+        # input: [num_batch, num_frames, freq_bins, 3] ==> [num_batch * num_frames, freq_bins, 3]
+        # target: [num_batch, num_frames, freq_bins] ==> [num_batch * num_frames, freq_bins]
+        input_shape = train_inputs.get_shape().as_list()
+        train_inputs = tf.reshape(train_inputs, [-1, input_shape[2], input_shape[3]])
+        # train_inputs = tf.reshape(train_inputs, [-1, input_shape[2]])
+        target_shape = train_targets.get_shape().as_list()
+        train_targets = tf.reshape(train_targets, [-1, target_shape[2]])
+
         model.run_on_batch(train_inputs, train_targets)
         
         init = tf.group(tf.initialize_all_variables(), tf.initialize_local_variables())
-
         saver = tf.train.Saver()
 
         with tf.Session() as session:
@@ -196,212 +212,66 @@ def model_test(test_input):
             
             coord = tf.train.Coordinator()
             threads = tf.train.start_queue_runners(sess=session, coord=coord)
-            total_train_cost = 0
+
+            out_results = []
+            masked_results = []
 
             try:
                 step_ii = 0
                 while not coord.should_stop():
                     start = time.time()
 
-                    print(train_inputs.eval())
-                    output, batch_cost, summary, optimizer = session.run([model.output, model.loss, model.merged_summary_op, model.optimizer])
-                    print(train_inputs.eval())
-                    assert(False)
-                    
-                    total_train_cost += batch_cost * curr_batch_size
+                    output, masked_output, batch_cost, summary, optimizer = session.run([model.output, 
+                                                                            model.masked_output,
+                                                                            model.loss,
+                                                                            model.merged_summary_op, 
+                                                                            model.optimizer])
 
                     step_ii += 1
                     duration = time.time() - start
 
-                    if step_ii % 1 == 0:
-                        print('Step %d: loss = %.2f (%.3f sec)' % (step_ii, batch_cost, duration))
+                    print('Step %d: loss = %.5f (%.3f sec)' % (step_ii, batch_cost, duration))
+
+                    song_out, voice_out = tf.split(output, [Config.num_freq_bins, Config.num_freq_bins], axis=1)
+                    song_masked, voice_masked = tf.split(masked_output, [Config.num_freq_bins, Config.num_freq_bins], axis=1)
+                    song_target, voice_target = tf.split(train_targets, [Config.num_freq_bins, Config.num_freq_bins], axis=1)
+
+                    result_wav_dir = 'data/results'
+
+                    song_out_audio = create_audio_from_spectrogram(song_out)
+                    voice_out_audio = create_audio_from_spectrogram(voice_out)
+
+                    writeWav(os.path.join(result_wav_dir, 'song_out%d.wav' % (step_ii)), sample_rate, song_out_audio)
+                    writeWav(os.path.join(result_wav_dir, 'voice_out%d.wav' % (step_ii)), sample_rate, voice_out_audio)
+
+                    song_masked_audio = create_audio_from_spectrogram(song_masked)
+                    voice_masked_audio = create_audio_from_spectrogram(voice_masked)
+
+                    writeWav(os.path.join(result_wav_dir, 'song_masked%d.wav' % (step_ii)), sample_rate, song_out_audio)
+                    writeWav(os.path.join(result_wav_dir, 'voice_masked%d.wav' % (step_ii)), sample_rate, voice_out_audio)
+
+                    song_target_audio = create_audio_from_spectrogram(song_target)
+                    voice_target_audio = create_audio_from_spectrogram(voice_target)
+
+                    writeWav(os.path.join(result_wav_dir, 'song_target%d.wav' % (step_ii)), sample_rate, song_target_audio)
+                    writeWav(os.path.join(result_wav_dir, 'voice_target%d.wav' % (step_ii)), sample_rate, voice_target_audio)
+
+                    out_sdr, out_sir, out_sar, _ = bss_eval_sources(np.array([song_out_audio, voice_out_audio]), np.array([song_target_audio, voice_target_audio]), False)
+                    masked_sdr, masked_sir, masked_sar, _ = bss_eval_sources(np.array([song_out_audio, voice_out_audio]), np.array([song_target_audio, voice_target_audio]), False)
+
+                    out_results.append([out_sdr[0], out_sdr[1], out_sir[0], out_sir[1], out_sar[0], out_sar[1]])
+                    masked_results.append([masked_sdr[0], masked_sdr[1], masked_sir[0], masked_sir[1], masked_sar[0], masked_sar[1]])
 
             except tf.errors.OutOfRangeError:
-                pass
+                out_results = np.asarray(out_results)
+                masked_results = np.asarray(masked_results)
+
+                print(np.mean(out_results, axis=0))
+                print(np.mean(masked_results, axis=0))
             finally:
                 coord.request_stop()
 
             coord.join(threads)
-
-    
-    clean_rate, clean_audio = wavfile.read(CLEAN_FILE)
-    noise_rate, noise_audio = wavfile.read(NOISE_FILE)
-
-    length = len(clean_audio)
-    noise_audio = noise_audio[:length]
-
-    clean_spec = stft.spectrogram(clean_audio)
-    noise_spec = stft.spectrogram(noise_audio)
-    test_spec = stft.spectrogram(test_audio)
-
-    reverted_clean = stft.ispectrogram(clean_spec)
-    reverted_noise = stft.ispectrogram(noise_spec)
-
-    test_data = np.array([test_spec.transpose() / 100000])  # make data a batch of 1
-
-    with tf.Graph().as_default():
-        model = SeparationModel()
-        saver = tf.train.Saver(tf.trainable_variables())
-        
-        with tf.Session() as session:
-            ckpt = tf.train.get_checkpoint_state('checkpoints/')
-            if ckpt:
-                print("Reading model parameters from %s" % ckpt.model_checkpoint_path)
-                saver.restore(session, ckpt.model_checkpoint_path)
-            else:
-                print("Created model with fresh parameters.")
-                session.run(tf.initialize_all_variables())
-
-            test_data_shape = np.shape(test_data)
-            dummy_target = np.zeros((test_data_shape[0], test_data_shape[1], 2 * test_data_shape[2]))
-
-            output, _, _ = model.train_on_batch(session, test_data, dummy_target, train=False)
-
-            num_freq_bin = output.shape[2] / 2
-            clean_output = output[0,:,:num_freq_bin]
-            noise_output = output[0,:,num_freq_bin:]
-
-            clean_mask, noise_mask = create_mask(clean_output, noise_output)
-
-            clean_spec = createSpectrogram(np.multiply(clean_mask.transpose(), test_spec), test_spec.stft_settings) 
-            noise_spec = createSpectrogram(np.multiply(noise_mask.transpose(), test_spec), test_spec.stft_settings)
-
-            clean_wav = stft.ispectrogram(clean_spec)
-            noise_wav = stft.ispectrogram(noise_spec)
-
-            sdr, sir, sar, _ = bss_eval_sources(np.array([reverted_clean, reverted_noise]), np.array([clean_wav, noise_wav]), False)
-            print(sdr, sir, sar)
-
-            writeWav('data/test_combined/output_clean.wav', 44100, clean_wav)
-            writeWav('data/test_combined/output_noise.wav', 44100, noise_wav)
-
-def model_batch_test():
-
-    test_batch = h5py.File('%stest_batch_amplified' % (DIR))
-    data = test_batch['data'].value
-
-    with open('%stest_settings.pkl' % (DIR), 'rb') as f:
-        settings = pickle.load(f)
-
-    # print(settings[:2])
-    
-    combined, clean, noise = zip(data)
-    combined = combined[0]
-    clean = clean[0]
-    noise = noise[0]
-    target = np.concatenate((clean,noise), axis=2)
-
-    # test_rate, test_audio = wavfile.read('data/test_combined/combined.wav')
-    # test_spec = stft.spectrogram(test_audio)
-
-    combined_batch, target_batch = create_batch(combined, target, 50)
-
-    original_combined_batch = [copy.deepcopy(batch) for batch in combined_batch]
-
-    with tf.Graph().as_default():
-        model = SeparationModel()
-        saver = tf.train.Saver(tf.trainable_variables())
-        
-        with tf.Session() as session:
-            ckpt = tf.train.get_checkpoint_state('checkpoints/')
-            if ckpt:
-                print("Reading model parameters from %s" % ckpt.model_checkpoint_path)
-                saver.restore(session, ckpt.model_checkpoint_path)
-            else:
-                print("Created model with fresh parameters.")
-                session.run(tf.initialize_all_variables())
-
-            prev_mask_array = None
-            diff = float('inf')
-            iters = 0
-
-            while True:
-                curr_mask_array = []
-                iters += 1
-                output, _, _ = model.train_on_batch(session, combined_batch[0], target_batch[0], train=False)
-
-                num_freq_bin = output.shape[2] / 2
-                clean_outputs = output[:,:,:num_freq_bin]
-                noise_outputs = output[:,:,num_freq_bin:]
-
-                # clean = [target[:,:num_freq_bin] for target in target_batch]
-                # noise = [target[:,num_freq_bin:] for target in target_batch]
-
-                num_outputs = len(clean_outputs)
-
-                results = []
-
-                for i in xrange(num_outputs):
-                    orig_clean_output = clean_outputs[i]
-                    orig_noise_output = noise_outputs[i]
-
-                    stft_settings = copy.deepcopy(settings[i])
-                    orig_length = stft_settings['orig_length']
-                    stft_settings.pop('orig_length', None)
-                    clean_output = orig_clean_output[-orig_length:]
-                    noise_output = orig_noise_output[-orig_length:]
-
-                    clean_mask, noise_mask = create_mask(clean_output, noise_output)
-                    orig_clean_mask, orig_noise_mask = create_mask(orig_clean_output, orig_noise_output)
-
-                    curr_mask_array.append(clean_mask)
-                    # if i == 0:
-                        # print clean_mask[10:20,10:20]
-                    curr_mask_array.append(noise_mask)
-
-                    clean_spec = createSpectrogram(np.multiply(clean_mask.transpose(), original_combined_batch[0][i][-orig_length:].transpose()), settings[i])
-                    noise_spec = createSpectrogram(np.multiply(noise_mask.transpose(), original_combined_batch[0][i][-orig_length:].transpose()), settings[i])
-
-                    # print '-' * 20
-                    # print original_combined_batch[0][i]
-                    # print '=' * 20
-                    combined_batch[0][i] += np.multiply(orig_clean_mask, original_combined_batch[0][i]) * 0.1
-                    # print combined_batch[0][i]
-                    # print '=' * 20
-                    # print original_combined_batch[0][i]
-                    # print '-' * 20
-
-                    estimated_clean_wav = stft.ispectrogram(clean_spec)
-                    estimated_noise_wav = stft.ispectrogram(noise_spec)
-
-                    reference_clean_wav = stft.ispectrogram(SpectrogramArray(clean[i][-orig_length:], stft_settings).transpose())
-                    reference_noise_wav = stft.ispectrogram(SpectrogramArray(noise[i][-orig_length:], stft_settings).transpose())
-
-                    try:
-                        sdr, sir, sar, _ = bss_eval_sources(np.array([reference_clean_wav, reference_noise_wav]), np.array([estimated_clean_wav, estimated_noise_wav]), False)
-                        results.append((sdr[0], sdr[1], sir[0], sir[1], sar[0], sar[1]))
-                        # print('%f, %f, %f, %f, %f, %f' % (sdr[0], sdr[1], sir[0], sir[1], sar[0], sar[1]))
-                    except ValueError:
-                        print('error')
-                        continue
-                # break
-                
-                diff = 1
-                if prev_mask_array is not None:
-                    # print curr_mask_array[0]
-                    # print prev_mask_array[0]
-                    diff = sum(np.sum(np.abs(curr_mask_array[i] - prev_mask_array[i])) for i in xrange(len(prev_mask_array)))
-                    print('Changes after iteration %d: %d' % (iters, diff))
-
-                sdr_cleans, sdr_noises, sir_cleans, sir_noises, sar_cleans, sar_noises = zip(*results)
-                print('Avg sdr_cleans: %f, sdr_noises: %f, sir_cleans: %f, sir_noises: %f, sar_cleans: %f, sar_noises: %f' % (np.mean(sdr_cleans), np.mean(sdr_noises), np.mean(sir_cleans), np.mean(sir_noises), np.mean(sar_cleans), np.mean(sar_noises)))
-                with open('data/results/masking_iteration_amplified' + '.csv', 'a+') as f:
-                    f.write('%d,%f,%f,%f,%f,%f,%f\n' % (diff,np.mean(sdr_cleans), np.mean(sdr_noises), np.mean(sir_cleans), np.mean(sir_noises), np.mean(sar_cleans), np.mean(sar_noises)))
-
-                prev_mask_array = [np.copy(mask) for mask in curr_mask_array]
-
-                # if diff == 0:
-                #     break
-
-            results_filename = '%sresults_%d_%f' % ('data/results/', Config.num_layers, Config.lr)
-            # results_filename += 'freq_weighted'
-
-            with open(results_filename + '.csv', 'w+') as f:
-                for sdr_1, sdr_2, sir_1, sir_2, sar_1, sar_2 in results:
-                    f.write('%f,%f,%f,%f,%f,%f\n' % (sdr_1, sdr_2, sir_1, sir_2, sar_1, sar_2))
-
-            # f = h5py.File(results_filename, 'w')
-            # f.create_dataset('result', data=results, compression="gzip", compression_opts=9)
 
 
 def writeWav(fn, fs, data):
@@ -457,5 +327,5 @@ if __name__ == "__main__":
     elif args.train:
         model_train(args.freq_weighted)
     else:
-        model_test(args.test_single_input)
+        model_test()
 

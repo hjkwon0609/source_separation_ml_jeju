@@ -2,6 +2,7 @@ import stft
 from scipy.signal import hamming
 import numpy as np
 import tensorflow as tf
+from config import Config
 
 ############################################################################
 ##  Spectrogram util functions
@@ -11,6 +12,7 @@ CONST = 10000  # prevent input values from being too large
 setting = None
 
 def create_spectrogram_from_audio(data):
+	global setting
 	spectrogram = stft.spectrogram(data, framelength=512, window=hamming).transpose() / CONST
 	setting = spectrogram.stft_settings  # setting is going to be same for all spectrograms
 	spectrogram = np.asarray(spectrogram)
@@ -22,7 +24,15 @@ def create_spectrogram_from_audio(data):
 	return concatenated
 
 def create_audio_from_spectrogram(spec):
-	return stft.ispectrogram(SpectrogramArray(spec, stft_settings=setting).transpose() * CONST)
+	# reconstruct complex number from real and imaginary components
+	# real, imag = tf.split(spec, [Config.num_freq_bins, Config.num_freq_bins / 2], axis=1)
+	# orig_spec = tf.complex(real, tf.zeros_like(imag))
+
+	spec_transposed = tf.transpose(spec)
+	transformed = stft.types.SpectrogramArray(spec_transposed.eval(), stft_settings=setting)
+	transformed *= CONST
+	
+	return stft.ispectrogram(transformed)
 
 ############################################################################
 ##  Vector Product Functions

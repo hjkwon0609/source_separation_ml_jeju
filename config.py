@@ -5,7 +5,7 @@ class Config:
     information parameters. Model objects are passed a Config() object at
     instantiation.
     """
-    num_freq_bins = 514
+    num_freq_bins = 257
     num_time_frames = 5169
 
     batch_size = 10
@@ -14,8 +14,8 @@ class Config:
 
     num_layers = 3
 
-    num_epochs = 50
+    num_epochs = 1000
     l2_lambda = 0.01
-    lr = 0.001
+    lr = 0.0005
     beta1 = 0.9
     beta2 = 0.999
