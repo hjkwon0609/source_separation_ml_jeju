@@ -5,6 +5,7 @@ import stft
 import h5py
 import sys
 import tensorflow as tf
+import librosa
 
 sys.path.insert(1, os.path.join(sys.path[0], '..'))
 from util import *
@@ -38,6 +39,9 @@ if __name__ == '__main__':
 			song = data[:,0]
 			voice = data[:,1]
 
+			song = librosa.resample(song, rate, 16000)
+			voice = librosa.resample(song, rate, 16000)
+
 			mixed = song / 2 + voice / 2
 
 			song_spec, voice_spec, mixed_spec = create_spectrogram_from_audio(song), \
@@ -69,8 +73,10 @@ if __name__ == '__main__':
 			writer.write(example.SerializeToString())
 			writer.close()
 
-	np.save(os.path.join(PREPROCESSING_STAT_DIR, 'stats'),
-		[np.mean(mixed_specs), np.var(mixed_specs), np.mean(song_specs), np.var(song_specs), np.mean(voice_specs), np.var(voice_specs)])
+	# np.save(os.path.join(PREPROCESSING_STAT_DIR, 'per_freq_stats'),
+	# 	[np.mean(mixed_specs,axis=0), np.var(mixed_specs,axis=0), np.mean(song_specs,axis=0), np.var(song_specs,axis=0), np.mean(voice_specs,axis=0), np.var(voice_specs,axis=0)])
+	# np.save(os.path.join(PREPROCESSING_STAT_DIR, 'total_stats'),
+	# 	[np.mean(mixed_specs,axis=0), np.var(mixed_specs,axis=0), np.mean(song_specs,axis=0), np.var(song_specs,axis=0), np.mean(voice_specs,axis=0), np.var(voice_specs,axis=0)])
 
 
 

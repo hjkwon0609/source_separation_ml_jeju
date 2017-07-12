@@ -30,6 +30,8 @@ TRAIN_DIR = 'data/train'
 TEST_DIR = 'data/test'
 PREPROCESSING_STAT_DIR = 'data/preprocessing_stat'
 
+model_name = 'relu_small_vpnn_lr%f_masking_layer_layer%d' % (Config.lr, Config.num_layers)
+
 def read_and_decode(filename_queue, stats):
     reader = tf.TFRecordReader()
     _, serialized_example = reader.read(filename_queue)
@@ -45,18 +47,18 @@ def read_and_decode(filename_queue, stats):
     mixed_spec = transform_spec_from_raw(features['mixed_spec'])
 
     # normalize data with training preprocessing mean, var
-    mixed_mean, mixed_var, song_mean, song_var, voice_mean, voice_var = stats
+    # mixed_mean, mixed_var, song_mean, song_var, voice_mean, voice_var = stats
     
-    # normalize magnitude of spectrums
-    normalized_mixed_spec = tf.complex(tf.real(mixed_spec - mixed_mean) / tf.sqrt(mixed_var), tf.imag(mixed_spec))
-    normalized_song_spec = tf.complex(tf.real(song_spec - song_mean) / tf.sqrt(song_var), tf.imag(song_spec))
-    normalized_voice_spec = tf.complex(tf.real(voice_spec - voice_mean) / tf.sqrt(voice_var), tf.imag(voice_spec))
+    # # normalize magnitude of spectrums
+    # normalized_mixed_spec = tf.complex(tf.real(mixed_spec - mixed_mean) / tf.sqrt(mixed_var), tf.imag(mixed_spec))
+    # normalized_song_spec = tf.complex(tf.real(song_spec - song_mean) / tf.sqrt(song_var), tf.imag(song_spec))
+    # normalized_voice_spec = tf.complex(tf.real(voice_spec - voice_mean) / tf.sqrt(voice_var), tf.imag(voice_spec))
 
     # stacked_song_spec = stack_spectrograms(song_spec)
     # stacked_voice_spec = stack_spectrograms(voice_spec)
-    stacked_mixed_spec = stack_spectrograms(normalized_mixed_spec)  # this will be the input
+    stacked_mixed_spec = stack_spectrograms(mixed_spec)  # this will be the input
 
-    target_spec = tf.concat([normalized_song_spec, normalized_voice_spec], axis=1) # axis=2  # target spec is going to be a concatenation of song_spec and voice_spec
+    target_spec = tf.concat([song_spec, voice_spec], axis=1) # axis=2  # target spec is going to be a concatenation of song_spec and voice_spec
 
     # return mixed_spec, target_spec
     return stacked_mixed_spec, target_spec
@@ -119,7 +121,7 @@ def prepare_data(train):
     return input_specs, target_specs, stats  # return stats for loss calculation later
 
 def model_train(freq_weighted):
-    logs_path = "tensorboard/" + strftime("%Y_%m_%d_%H_%M_%S", gmtime()) + 'small_vpnn_lr%f' % (Config.lr) 
+    logs_path = "tensorboard/" + strftime("%Y_%m_%d_%H_%M_%S", gmtime()) + model_name 
     
     with tf.Graph().as_default():
         
@@ -156,7 +158,7 @@ def model_train(freq_weighted):
                     start = time.time()
                     step_ii += 1
                     
-                    output, batch_cost, summary, optimizer = session.run([model.output, model.loss, model.merged_summary_op, model.optimizer])
+                    output, batch_cost, masked_loss, summary, optimizer = session.run([model.output, model.loss, model.masked_loss, model.merged_summary_op, model.optimizer])
                     
                     # total_train_cost += batch_cost * curr_batch_size
                     train_writer.add_summary(summary, step_ii)
@@ -164,10 +166,10 @@ def model_train(freq_weighted):
                     duration = time.time() - start
 
                     if step_ii % 1 == 0:
-                        print('Step %d: loss = %.5f (%.3f sec)' % (step_ii, batch_cost, duration))
+                        print('Step %d: loss = %.5f masked_loss = %.5f (%.3f sec)' % (step_ii, batch_cost, masked_loss, duration))
 
                     if step_ii % 100 == 0:
-                        checkpoint_name = 'checkpoints/small_vpnn%dlayer_%flr_model' % (Config.num_layers, Config.lr)
+                        checkpoint_name = 'checkpoints/' + model_name
                         saver.save(session, checkpoint_name, global_step=model.global_step)
 
             except tf.errors.OutOfRangeError:
@@ -207,8 +209,8 @@ def model_test():
             coord = tf.train.Coordinator()
             threads = tf.train.start_queue_runners(sess=session, coord=coord)
 
-            out_results = []
-            masked_results = []
+            hard_masked_results = []
+            soft_masked_results = []
 
             print('num trainable parameters: %s' % (np.sum([np.prod(v.get_shape().as_list()) for v in tf.trainable_variables()])))
 
@@ -217,11 +219,12 @@ def model_test():
                 while not coord.should_stop():
                     start = time.time()
 
-                    hard_masked_output, soft_masked_output, batch_cost, summary, target = session.run([model.hard_masked_output, 
+                    hard_masked_output, soft_masked_output, batch_cost, summary, target, mixed_spec = session.run([model.hard_masked_output, 
                                                                             model.soft_masked_output,
                                                                             model.loss,
                                                                             model.merged_summary_op,
-                                                                            model.target])
+                                                                            model.target,
+                                                                            model.input])
 
                     step_ii += 1
                     duration = time.time() - start
@@ -243,7 +246,15 @@ def model_test():
                     soft_voice_masked = tf.complex(tf.real(soft_voice_masked) * tf.sqrt(voice_var) + voice_mean, tf.imag(soft_voice_masked))
                     voice_target = tf.complex(tf.real(voice_target) * tf.sqrt(voice_var) + voice_mean, tf.imag(voice_target))                    
 
+                    mixed_spec = mixed_spec[:,:,1]
+                    # print('before shape: %s' % (mixed_spec.shape))
+                    mixed_spec = mixed_spec.real * tf.sqrt(mixed_var) + mixed_mean + mixed_spec.imag
+                    # print('after shape: %s' % (mixed_spec.shape))
+
                     result_wav_dir = 'data/results'
+
+                    mixed_audio = create_audio_from_spectrogram(mixed_spec)
+                    writeWav(os.path.join(result_wav_dir, 'mixed%d.wav' % (step_ii)), sample_rate, mixed_audio)
 
                     hard_song_masked_audio = create_audio_from_spectrogram(hard_song_masked)
                     hard_voice_masked_audio = create_audio_from_spectrogram(hard_voice_masked)
@@ -263,18 +274,22 @@ def model_test():
                     writeWav(os.path.join(result_wav_dir, 'song_target%d.wav' % (step_ii)), sample_rate, song_target_audio)
                     writeWav(os.path.join(result_wav_dir, 'voice_target%d.wav' % (step_ii)), sample_rate, voice_target_audio)
 
-                    hard_sdr, hard_sir, hard_sar, _ = bss_eval_sources(np.array([song_target_audio, voice_target_audio]), np.array([hard_song_masked_audio, hard_voice_masked_audio]), False)
-                    soft_sdr, soft_sir, soft_sar, _ = bss_eval_sources(np.array([song_target_audio, voice_target_audio]), np.array([soft_song_masked_audio, soft_voice_masked_audio]), False)
+                    # hard_sdr, hard_sir, hard_sar, _ = bss_eval_sources(np.array([song_target_audio, voice_target_audio]), np.array([hard_song_masked_audio, hard_voice_masked_audio]), False)
+                    # soft_sdr, soft_sir, soft_sar, _ = bss_eval_sources(np.array([song_target_audio, voice_target_audio]), np.array([soft_song_masked_audio, soft_voice_masked_audio]), False)
+                    hard_gnsdr, hard_gsir, hard_gsar = bss_eval_global(mixed_audio, song_target_audio, voice_target_audio, hard_song_masked_audio, hard_voice_masked_audio)
+                    soft_gnsdr, soft_gsir, soft_gsar = bss_eval_global(mixed_audio, song_target_audio, voice_target_audio, soft_song_masked_audio, soft_voice_masked_audio)
 
-                    out_results.append([hard_sdr[0], hard_sdr[1], hard_sir[0], hard_sir[1], hard_sar[0], hard_sar[1]])
-                    masked_results.append([soft_sdr[0], soft_sdr[1], soft_sir[0], soft_sir[1], soft_sar[0],soft_sar[1]])
+                    # out_results.append([hard_sdr[0], hard_sdr[1], hard_sir[0], hard_sir[1], hard_sar[0], hard_sar[1]])
+                    # masked_results.append([soft_sdr[0], soft_sdr[1], soft_sir[0], soft_sir[1], soft_sar[0],soft_sar[1]])
+                    hard_masked_results.append([hard_gnsdr[0], hard_gnsdr[1], hard_gsir[0], hard_gsir[1], hard_gsar[0], hard_gsar[1]])
+                    soft_masked_results.append([soft_gnsdr[0], soft_gnsdr[1], soft_gsir[0], soft_gsir[1], soft_gsar[0], soft_gsar[1]])
 
             except tf.errors.OutOfRangeError:
-                out_results = np.asarray(out_results)
-                masked_results = np.asarray(masked_results)
+                hard_masked_results = np.asarray(hard_masked_results)
+                soft_masked_results = np.asarray(soft_masked_results)
 
-                print(np.mean(out_results, axis=0))
-                print(np.mean(masked_results, axis=0))
+                print(np.mean(hard_masked_results, axis=0))
+                print(np.mean(soft_masked_results, axis=0))
             finally:
                 coord.request_stop()
 
@@ -320,6 +335,28 @@ def createSpectrogram(arr, settings):
                                 }
                         )
     return x
+
+def bss_eval_global(mixed_wav, src1_wav, src2_wav, pred_src1_wav, pred_src2_wav):
+    len_cropped = pred_src1_wav.shape[-1]
+    src1_wav = src1_wav[:len_cropped]
+    src2_wav = src2_wav[:len_cropped]
+    mixed_wav = mixed_wav[:len_cropped]
+    gnsdr, gsir, gsar = np.zeros(2), np.zeros(2), np.zeros(2)
+    total_len = 0
+    # for i in range(2):
+    sdr, sir, sar, _ = bss_eval_sources(np.array([src1_wav, src2_wav]),
+                                        np.array([pred_src1_wav, pred_src2_wav]), False)
+    sdr_mixed, _, _, _ = bss_eval_sources(np.array([src1_wav, src2_wav]),
+                                          np.array([mixed_wav, mixed_wav]), False)
+    nsdr = sdr - sdr_mixed
+    gnsdr += len_cropped * nsdr
+    gsir += len_cropped * sir
+    gsar += len_cropped * sar
+    total_len += len_cropped
+    gnsdr = gnsdr / total_len
+    gsir = gsir / total_len
+    gsar = gsar / total_len
+    return gnsdr, gsir, gsar
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

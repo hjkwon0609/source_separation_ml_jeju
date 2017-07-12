@@ -46,15 +46,16 @@ class SeparationModel():
 
 
     def add_prediction_op(self, input_spec):
-        curr = tf.real(input_spec)  # use real component for training
+        self.input = input_spec
+        curr = tf.abs(self.input)  # use real component for training
 
         for i in xrange(Config.num_layers):
             layer_name = 'hidden%d' % (i + 1)
-            activation_fn = tf.nn.tanh if i < Config.num_layers - 1 else tf.nn.relu
+            activation_fn = tf.nn.relu #if i < Config.num_layers - 1 else tf.nn.relu
             curr = self.create_layer(layer_name, curr, Config.num_hidden, activation_fn)
 
-        song_out = self.create_layer('output_song', curr, Config.num_freq_bins)
-        voice_out = self.create_layer('output_voice', curr, Config.num_freq_bins)
+        song_out = self.create_layer('output_song', curr, Config.num_freq_bins, tf.nn.relu)
+        voice_out = self.create_layer('output_voice', curr, Config.num_freq_bins, tf.nn.relu)
 
         song_out, voice_out = song_out[:,:,1], voice_out[:,:,1]
 
@@ -66,7 +67,7 @@ class SeparationModel():
         hard_song_mask = tf.cast(tf.greater(tf.abs(song_out), tf.abs(voice_out)), tf.int32)  #tf.abs(song_out)  (tf.abs(song_out) + tf.abs(voice_out))
         hard_voice_mask = 1 - hard_song_mask
         # soft masking
-        soft_song_mask = tf.abs(song_out) / (tf.abs(song_out) + tf.abs(voice_out))
+        soft_song_mask = song_out / (song_out + voice_out + 1e-10) # tf.abs(song_out) / (tf.abs(song_out) + tf.abs(voice_out))
         soft_voice_mask = 1 - soft_song_mask
 
         input_spec_curr = input_spec[:,:,1]  # current frame of input spec
@@ -84,7 +85,7 @@ class SeparationModel():
 
     def add_loss_op(self, target):
         self.target = target  # for outputting later
-        real_target = tf.real(self.target)
+        real_target = tf.abs(self.target)
 
         delta = self.output - real_target  # only compare the current frame
         # squared_error = tf.norm(delta, ord=2)
@@ -99,17 +100,17 @@ class SeparationModel():
         tf.summary.scalar("squared_error", mean_error)
         tf.summary.scalar("loss", self.loss)
 
-        # song_target, voice_target = tf.split(target, [Config.num_freq_bins, Config.num_freq_bins], axis=1)
+        # song_target, voice_target = tf.split(self.target, [Config.num_freq_bins, Config.num_freq_bins], axis=1)
 
-        # masked_loss = self.masked_output * (tf.norm(target, ord=2) / tf.norm(self.masked_output, ord=2)) - target
-        # self.masked_loss = tf.norm(masked_loss, ord=2) / self.output.get_shape().as_list()[0]
-        # tf.summary.scalar('masked_loss', self.masked_loss)    
+        masked_loss = tf.abs(self.soft_masked_output) - real_target
+        self.masked_loss = Config.l2_lambda * l2_cost + tf.reduce_sum(tf.pow(masked_loss, 2)) / self.output.get_shape().as_list()[0]
+        tf.summary.scalar('masked_loss', self.masked_loss)
 
 
     def add_training_op(self):
         optimizer = tf.train.AdamOptimizer(learning_rate=Config.lr, beta1=Config.beta1, beta2=Config.beta2)
         # optimizer = tf.train.GradientDescentOptimizer(learning_rate=Config.lr)
-        grads = optimizer.compute_gradients(self.loss)
+        grads = optimizer.compute_gradients(self.masked_loss)
         for grad, var in grads:
             tf.summary.histogram('gradient_norm_%s' % (var), grad)
         self.optimizer = optimizer.apply_gradients(grads, global_step=self.global_step)
