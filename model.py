@@ -63,23 +63,28 @@ class SeparationModel():
         self.output = curr_frame
 
         # hard masking
-        # song_mask = tf.cast(tf.greater(tf.abs(song_out), tf.abs(voice_out)), tf.int32)  #tf.abs(song_out)  (tf.abs(song_out) + tf.abs(voice_out))
+        hard_song_mask = tf.cast(tf.greater(tf.abs(song_out), tf.abs(voice_out)), tf.int32)  #tf.abs(song_out)  (tf.abs(song_out) + tf.abs(voice_out))
+        hard_voice_mask = 1 - hard_song_mask
         # soft masking
-        song_mask = tf.abs(song_out) / (tf.abs(song_out) + tf.abs(voice_out))
-        voice_mask = 1 - song_mask
+        soft_song_mask = tf.abs(song_out) / (tf.abs(song_out) + tf.abs(voice_out))
+        soft_voice_mask = 1 - soft_song_mask
 
         input_spec_curr = input_spec[:,:,1]  # current frame of input spec
         # input_spec_curr = input_spec  # current frame of input spec
-        song_output = tf.multiply(input_spec_curr, tf.cast(song_mask, tf.complex64))
-        voice_output = tf.multiply(input_spec_curr, tf.cast(voice_mask, tf.complex64))
+        hard_song_output = tf.multiply(input_spec_curr, tf.cast(hard_song_mask, tf.complex64))
+        hard_voice_output = tf.multiply(input_spec_curr, tf.cast(hard_voice_mask, tf.complex64))
+        soft_song_output = tf.multiply(input_spec_curr, tf.cast(soft_song_mask, tf.complex64))
+        soft_voice_output = tf.multiply(input_spec_curr, tf.cast(soft_voice_mask, tf.complex64))
         # song_output = np.multiply(input_spec_curr, song_mask)
         # voice_output = np.multiply(input_spec_curr, voice_mask)
 
-        self.masked_output = tf.concat([song_output, voice_output], axis=1)
+        self.hard_masked_output = tf.concat([hard_song_output, hard_voice_output], axis=1)
+        self.soft_masked_output = tf.concat([soft_song_output, soft_voice_output], axis=1)
 
 
     def add_loss_op(self, target):
-        real_target = tf.real(target)
+        self.target = target  # for outputting later
+        real_target = tf.real(self.target)
 
         delta = self.output - real_target  # only compare the current frame
         # squared_error = tf.norm(delta, ord=2)
@@ -116,7 +121,7 @@ class SeparationModel():
 
     def run_on_batch(self, train_inputs_batch, train_targets_batch):
         self.global_step = tf.Variable(0, dtype=tf.int32, trainable=False, name='global_step')
-        
+
         self.add_prediction_op(train_inputs_batch)
         self.add_loss_op(train_targets_batch)
         self.add_training_op()

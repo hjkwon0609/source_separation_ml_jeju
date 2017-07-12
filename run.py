@@ -90,7 +90,7 @@ def prepare_data(train):
     filename = ['10161_chorus.tfrecords', '10161_verse.tfrecords', '10164_chorus.tfrecords', '10170_chorus.tfrecords']
     files = [os.path.join(data_dir, f) for f in filename]
     # if not train:
-    #     files = files[:5]
+        # files = files[:5]
     
     # normalize data
     stats = np.load(os.path.join(PREPROCESSING_STAT_DIR, 'stats.npy'))
@@ -107,14 +107,14 @@ def prepare_data(train):
         [input_spec, target_spec], batch_size=batch_size, num_threads=2,
         capacity= 2 + 3 * batch_size)
 
-    # reshape so each frame becomes one example, instead of each song being an example
-    # input: [num_batch, num_frames, freq_bins, 3] ==> [num_batch * num_frames, freq_bins, 3]
-    # target: [num_batch, num_frames, freq_bins] ==> [num_batch * num_frames, freq_bins]
-    input_shape = input_specs.get_shape().as_list()
-    input_specs = tf.reshape(input_specs, [-1, input_shape[2], input_shape[3]])
-    # train_inputs = tf.reshape(train_inputs, [-1, input_shape[2]])
-    target_shape = target_specs.get_shape().as_list()
-    target_specs = tf.reshape(target_specs, [-1, target_shape[2]])
+        # reshape so each frame becomes one example, instead of each song being an example
+        # input: [num_batch, num_frames, freq_bins, 3] ==> [num_batch * num_frames, freq_bins, 3]
+        # target: [num_batch, num_frames, freq_bins] ==> [num_batch * num_frames, freq_bins]
+        input_shape = input_specs.get_shape().as_list()
+        input_specs = tf.reshape(input_specs, [-1, input_shape[2], input_shape[3]])
+        # train_inputs = tf.reshape(train_inputs, [-1, input_shape[2]])
+        target_shape = target_specs.get_shape().as_list()
+        target_specs = tf.reshape(target_specs, [-1, target_shape[2]])
 
     return input_specs, target_specs, stats  # return stats for loss calculation later
 
@@ -189,6 +189,7 @@ def model_test():
         model = SeparationModel(freq_weighted=False)  # don't use freq_weighted for now
 
         model.run_on_batch(train_inputs, train_targets)
+        print(train_inputs.get_shape())
         
         init = tf.group(tf.initialize_all_variables(), tf.initialize_local_variables())
         saver = tf.train.Saver()
@@ -216,34 +217,45 @@ def model_test():
                 while not coord.should_stop():
                     start = time.time()
 
-                    output, masked_output, batch_cost, summary, optimizer = session.run([model.output, 
-                                                                            model.masked_output,
+                    hard_masked_output, soft_masked_output, batch_cost, summary, target = session.run([model.hard_masked_output, 
+                                                                            model.soft_masked_output,
                                                                             model.loss,
-                                                                            model.merged_summary_op, 
-                                                                            model.optimizer])
+                                                                            model.merged_summary_op,
+                                                                            model.target])
 
                     step_ii += 1
                     duration = time.time() - start
 
                     print('Step %d: loss = %.5f (%.3f sec)' % (step_ii, batch_cost, duration))
 
-                    song_out, voice_out = tf.split(output, [Config.num_freq_bins, Config.num_freq_bins], axis=1)
-                    song_masked, voice_masked = tf.split(masked_output, [Config.num_freq_bins, Config.num_freq_bins], axis=1)
-                    song_target, voice_target = tf.split(train_targets, [Config.num_freq_bins, Config.num_freq_bins], axis=1)
+                    hard_song_masked, hard_voice_masked = tf.split(hard_masked_output, [Config.num_freq_bins, Config.num_freq_bins], axis=1)
+                    soft_song_masked, soft_voice_masked = tf.split(soft_masked_output, [Config.num_freq_bins, Config.num_freq_bins], axis=1)
+                    song_target, voice_target = tf.split(target, [Config.num_freq_bins, Config.num_freq_bins], axis=1)
+
+                    # original spectrum (reverting normalization)
+                    mixed_mean, mixed_var, song_mean, song_var, voice_mean, voice_var = stats
+                    
+                    hard_song_masked = tf.complex(tf.real(hard_song_masked) * tf.sqrt(song_var) + song_mean, tf.imag(hard_song_masked))    
+                    soft_song_masked = tf.complex(tf.real(soft_song_masked) * tf.sqrt(song_var) + song_mean, tf.imag(soft_song_masked))
+                    song_target = tf.complex(tf.real(song_target) * tf.sqrt(song_var) + song_mean, tf.imag(song_target))
+
+                    hard_voice_masked = tf.complex(tf.real(hard_voice_masked) * tf.sqrt(voice_var) + voice_mean, tf.imag(hard_voice_masked))
+                    soft_voice_masked = tf.complex(tf.real(soft_voice_masked) * tf.sqrt(voice_var) + voice_mean, tf.imag(soft_voice_masked))
+                    voice_target = tf.complex(tf.real(voice_target) * tf.sqrt(voice_var) + voice_mean, tf.imag(voice_target))                    
 
                     result_wav_dir = 'data/results'
 
-                    song_out_audio = create_audio_from_spectrogram(song_out)
-                    voice_out_audio = create_audio_from_spectrogram(voice_out)
+                    hard_song_masked_audio = create_audio_from_spectrogram(hard_song_masked)
+                    hard_voice_masked_audio = create_audio_from_spectrogram(hard_voice_masked)
 
-                    writeWav(os.path.join(result_wav_dir, 'song_out%d.wav' % (step_ii)), sample_rate, song_out_audio)
-                    writeWav(os.path.join(result_wav_dir, 'voice_out%d.wav' % (step_ii)), sample_rate, voice_out_audio)
+                    writeWav(os.path.join(result_wav_dir, 'hard_song_masked%d.wav' % (step_ii)), sample_rate, hard_song_masked_audio)
+                    writeWav(os.path.join(result_wav_dir, 'hard_voice_masked%d.wav' % (step_ii)), sample_rate, hard_voice_masked_audio)
 
-                    song_masked_audio = create_audio_from_spectrogram(song_masked)
-                    voice_masked_audio = create_audio_from_spectrogram(voice_masked)
+                    soft_song_masked_audio = create_audio_from_spectrogram(soft_song_masked)
+                    soft_voice_masked_audio = create_audio_from_spectrogram(soft_voice_masked)
 
-                    writeWav(os.path.join(result_wav_dir, 'song_masked%d.wav' % (step_ii)), sample_rate, song_out_audio)
-                    writeWav(os.path.join(result_wav_dir, 'voice_masked%d.wav' % (step_ii)), sample_rate, voice_out_audio)
+                    writeWav(os.path.join(result_wav_dir, 'soft_song_masked%d.wav' % (step_ii)), sample_rate, soft_song_masked_audio)
+                    writeWav(os.path.join(result_wav_dir, 'soft_voice_masked%d.wav' % (step_ii)), sample_rate, soft_voice_masked_audio)
 
                     song_target_audio = create_audio_from_spectrogram(song_target)
                     voice_target_audio = create_audio_from_spectrogram(voice_target)
@@ -251,11 +263,11 @@ def model_test():
                     writeWav(os.path.join(result_wav_dir, 'song_target%d.wav' % (step_ii)), sample_rate, song_target_audio)
                     writeWav(os.path.join(result_wav_dir, 'voice_target%d.wav' % (step_ii)), sample_rate, voice_target_audio)
 
-                    out_sdr, out_sir, out_sar, _ = bss_eval_sources(np.array([song_target_audio, voice_target_audio]), np.array([song_out_audio, voice_out_audio]), False)
-                    masked_sdr, masked_sir, masked_sar, _ = bss_eval_sources(np.array([song_target_audio, voice_target_audio]), np.array([song_out_audio, voice_out_audio]), False)
+                    hard_sdr, hard_sir, hard_sar, _ = bss_eval_sources(np.array([song_target_audio, voice_target_audio]), np.array([hard_song_masked_audio, hard_voice_masked_audio]), False)
+                    soft_sdr, soft_sir, soft_sar, _ = bss_eval_sources(np.array([song_target_audio, voice_target_audio]), np.array([soft_song_masked_audio, soft_voice_masked_audio]), False)
 
-                    out_results.append([out_sdr[0], out_sdr[1], out_sir[0], out_sir[1], out_sar[0], out_sar[1]])
-                    masked_results.append([masked_sdr[0], masked_sdr[1], masked_sir[0], masked_sir[1], masked_sar[0], masked_sar[1]])
+                    out_results.append([hard_sdr[0], hard_sdr[1], hard_sir[0], hard_sir[1], hard_sar[0], hard_sar[1]])
+                    masked_results.append([soft_sdr[0], soft_sdr[1], soft_sir[0], soft_sir[1], soft_sar[0],soft_sar[1]])
 
             except tf.errors.OutOfRangeError:
                 out_results = np.asarray(out_results)
