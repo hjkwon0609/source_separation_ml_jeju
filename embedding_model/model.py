@@ -22,37 +22,15 @@ from config import Config
 
 class SeparationModel():
 
-    def create_layer(self, name, X, output_len, activation_fn=None):
-        xavier = tf.contrib.layers.xavier_initializer()
-
-        with tf.name_scope(name):
-            W = tf.get_variable(name + 'W', shape=[X.get_shape()[1], output_len, 3], initializer=xavier, dtype=tf.float32)
-            # W = tf.get_variable(name + 'W', shape=[X.get_shape()[1], output_len], initializer=xavier, dtype=tf.float32)
-
-            b = tf.get_variable(name + 'b', shape=[output_len, 3], dtype=tf.float32)
-            # b = tf.get_variable(name + 'b', shape=[output_len], dtype=tf.float32)
-
-            tf.summary.histogram(name + 'weight_histogram', W)
-            tf.summary.histogram(name + 'bias_histogram', b)
-
-            # vector_product_matrix defined in util.py
-            output = vector_product_matrix(X, W) + b
-            # output = tf.matmul(X, W) + b
-            if activation_fn:
-                output = activation_fn(output)
-            tf.summary.histogram(name + 'output', output)
-
-            return output
-
-
     def add_prediction_op(self, input_spec):
         self.input = input_spec
         curr = tf.abs(self.input)  # use real component for training
 
+        xavier = tf.contrib.layers.xavier_initializer()
         for i in xrange(Config.num_layers):
             layer_name = 'hidden%d' % (i + 1)
-            activation_fn = tf.nn.relu #if i < Config.num_layers - 1 else tf.nn.relu
-            curr = self.create_layer(layer_name, curr, Config.num_hidden, activation_fn)
+            activation_fn = tf.nn.relu 
+            curr = tf.layers.dense(curr, kernel_initializer=xavier, units=Config.num_hidden, activation_fn=tf.nn.relu, name=layer_name)
 
         song_out = self.create_layer('output_song', curr, Config.num_freq_bins, tf.nn.relu)
         voice_out = self.create_layer('output_voice', curr, Config.num_freq_bins, tf.nn.relu)

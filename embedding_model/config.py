@@ -16,9 +16,11 @@ class Config:
 
     num_epochs = 5000
     l2_lambda = 0.01
-    lr = 0.0002
+    lr = 0.0001
     beta1 = 0.9
     beta2 = 0.999
 
     n_fft = 1024
     hop_length = 256
+
+    embedding_dim = 60

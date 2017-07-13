@@ -1,36 +1,26 @@
-import stft
-from scipy.signal import hamming
 import numpy as np
 import tensorflow as tf
 from config import Config
+import librosa
 
 ############################################################################
 ##  Spectrogram util functions
 ############################################################################
 
-setting = None
-
 def create_spectrogram_from_audio(data):
 	global setting
-	spectrogram = stft.spectrogram(data, framelength=512, window=hamming).transpose()
-	setting = spectrogram.stft_settings  # setting is going to be same for all spectrograms
-	spectrogram = np.asarray(spectrogram)
-	
+	spectrogram = librosa.stft(data, n_fft=Config.n_fft, hop_length=Config.hop_length).transpose()
+
 	# divide the real and imaginary components of each element 
 	# concatenate the matrix with the real components and the matrix with imaginary components
 	concatenated = np.concatenate([np.real(spectrogram), np.imag(spectrogram)], axis=1)
-	concatenated = np.asarray(concatenated, dtype=np.float32)
+	print concatenated.shape
 	return concatenated
 
 def create_audio_from_spectrogram(spec):
 	# reconstruct complex number from real and imaginary components
-	# real, imag = tf.split(spec, [Config.num_freq_bins, Config.num_freq_bins / 2], axis=1)
-	# orig_spec = tf.complex(real, tf.zeros_like(imag))
-
-	spec_transposed = tf.transpose(spec)
-	transformed = stft.types.SpectrogramArray(spec_transposed.eval(), stft_settings=setting)
-	
-	return stft.ispectrogram(transformed)
+	spec_transposed = np.transpose(spec.eval())
+	return stft.istft(spec_transposed, hop_length)
 
 ############################################################################
 ##  Vector Product Functions
