@@ -43,15 +43,16 @@ class SeparationModel():
 
     def add_prediction_op(self, input_spec):
         self.input = input_spec
+        print(input_spec.get_shape())
         curr = tf.abs(self.input)  # only use magnitude for training
 
+        activation_fn = tf.nn.relu if Config.use_relu else tf.nn.sigmoid
         for i in xrange(Config.num_layers):
-            layer_name = 'hidden%d' % (i + 1)
-            activation_fn = tf.nn.relu
+            layer_name = 'hidden%d' % (i + 1)    
             curr = self.create_layer(layer_name, curr, Config.num_hidden, activation_fn)
 
-        song_out = self.create_layer('output_song', curr, Config.num_freq_bins, tf.nn.relu)
-        voice_out = self.create_layer('output_voice', curr, Config.num_freq_bins, tf.nn.relu)
+        song_out = self.create_layer('output_song', curr, Config.num_freq_bins, activation_fn)
+        voice_out = self.create_layer('output_voice', curr, Config.num_freq_bins, activation_fn)
 
         song_out, voice_out = song_out[:,:,1], voice_out[:,:,1]
 
@@ -59,12 +60,12 @@ class SeparationModel():
         self.output = curr_frame
 
         # soft masking
-        soft_song_mask = song_out / (song_out + voice_out + 1e-10) # tf.abs(song_out) / (tf.abs(song_out) + tf.abs(voice_out))
+        soft_song_mask = tf.abs(song_out) / (tf.abs(song_out) + tf.abs(voice_out) + 1e-10) # tf.abs(song_out) / (tf.abs(song_out) + tf.abs(voice_out))
         soft_voice_mask = 1 - soft_song_mask
 
-        input_spec_curr = input_spec[:,:,1]  # current frame of input spec
-        soft_song_output = tf.multiply(input_spec_curr, tf.cast(soft_song_mask, tf.complex64))
-        soft_voice_output = tf.multiply(input_spec_curr, tf.cast(soft_voice_mask, tf.complex64))
+        input_spec_curr = self.input[:,:,1]  # current frame of input spec
+        soft_song_output = apply_mask(input_spec_curr, soft_song_mask)
+        soft_voice_output = apply_mask(input_spec_curr, soft_voice_mask)
 
         self.soft_masked_output = tf.concat([soft_song_output, soft_voice_output], axis=1)
 

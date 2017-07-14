@@ -22,11 +22,20 @@ def create_audio_from_spectrogram(spec):
 	print spec_transposed.shape
 	return librosa.istft(spec_transposed, Config.hop_length)
 
+def apply_mask(spec, mask):
+	mag_spec = tf.abs(spec)
+	phase_spec = get_phase(spec)
+	return tf.multiply(tf.cast(tf.multiply(mag_spec, mask), tf.complex64), tf.exp(tf.complex(tf.zeros_like(mag_spec), phase_spec)))
+
+def get_phase(spec):
+	return tf.imag(tf.log(spec))
+
 ############################################################################
 ##  Vector Product Functions
 ############################################################################
 
 def vector_product_matrix(X, W):
-	return tf.transpose([tf.matmul(X[:,:,1], W[:,:,2]) - tf.matmul(X[:,:,2], W[:,:,1]),
-		tf.matmul(X[:,:,2], W[:,:,0]) - tf.matmul(X[:,:,0], W[:,:,2]),
-		tf.matmul(X[:,:,0], W[:,:,1]) - tf.matmul(X[:,:,1], W[:,:,0])], (1, 2, 0))
+	# order different from paper since dimensions are transposed to make batch processing easier
+	return tf.transpose([tf.matmul(X[:,:,2], W[:,:,1]) - tf.matmul(X[:,:,1], W[:,:,2]),
+		tf.matmul(X[:,:,0], W[:,:,2]) - tf.matmul(X[:,:,2], W[:,:,0]),
+		tf.matmul(X[:,:,1], W[:,:,0]) - tf.matmul(X[:,:,0], W[:,:,1])], (1, 2, 0))

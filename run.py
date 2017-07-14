@@ -28,7 +28,7 @@ TRAIN_DIR = 'data/train'
 TEST_DIR = 'data/test'
 PREPROCESSING_STAT_DIR = 'data/preprocessing_stat'
 
-model_name = ('masked_loss' if Config.use_mask_loss else 'loss') + '_relu_vpnn_lr%f_masking_layer_layer%d' % (Config.lr, Config.num_layers)
+model_name = 'vpnn_lr%f_masking_layer_layer%d_num_hidden%d' % (Config.lr, Config.num_layers, Config.num_hidden)
 
 def read_and_decode(filename_queue):
     reader = tf.TFRecordReader()
@@ -49,9 +49,9 @@ def read_and_decode(filename_queue):
     target_spec = tf.concat([song_spec, voice_spec], axis=1) # target spec is going to be a concatenation of song_spec and voice_spec
 
     # reshape so each frame becomes one example, instead of each song being an example
-    # input: [num_frames, freq_bins, 3] ==> [num_frames, freq_bins, 3]
-    input_shape = input_spec.get_shape().as_list()
-    input_spec = tf.reshape(input_spec, [-1, input_shape[1], input_shape[2]])
+    # input: [freq_bins, freq_bins, 3] ==> [num_frames, freq_bins, 3]
+    # input_shape = input_spec.get_shape().as_list()
+    # input_spec = tf.reshape(input_spec, [-1, input_shape[1], input_shape[2]])
 
     return input_spec, target_spec
 
@@ -65,7 +65,7 @@ def transform_spec_from_raw(raw):
     spec = tf.reshape(spec, [-1, Config.num_freq_bins * 2])
     real, imag = tf.split(spec, [Config.num_freq_bins, Config.num_freq_bins], axis=1)
     orig_spec = tf.complex(real, imag)
-    return orig_spec
+    return orig_spec  # [num_time_frames, num_freq_bin]
 
 
 def stack_spectrograms(spec):
@@ -84,11 +84,12 @@ def stack_spectrograms(spec):
 def prepare_data(train):
     # data_dir = TRAIN_DIR if train else TEST_DIR
     data_dir = TRAIN_DIR
-    files = [os.path.join(data_dir, f) for f in os.listdir(data_dir) if f[-10:] == '.tfrecords']
+    files = sorted([os.path.join(data_dir, f) for f in os.listdir(data_dir) if f[-10:] == '.tfrecords'])
     # filename = ['10161_chorus.tfrecords', '10161_verse.tfrecords', '10164_chorus.tfrecords', '10170_chorus.tfrecords']
     # files = [os.path.join(data_dir, f) for f in filename]
     if not train:
-        files = files[:5]
+        files = files[:10]
+        print files
     
     with tf.name_scope('input'):
         num_epochs = Config.num_epochs if train else 1

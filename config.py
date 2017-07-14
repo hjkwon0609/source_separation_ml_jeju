@@ -10,7 +10,7 @@ class Config:
 
     batch_size = 18000
     output_size = num_freq_bins * 2
-    num_hidden = 1024
+    num_hidden = 512
 
     num_layers = 3
 
@@ -30,3 +30,4 @@ class Config:
     file_reader_capacity = 60000
 
     use_mask_loss = True
+    use_relu = False
