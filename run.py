@@ -28,7 +28,7 @@ TRAIN_DIR = 'data/train'
 TEST_DIR = 'data/test'
 PREPROCESSING_STAT_DIR = 'data/preprocessing_stat'
 
-model_name = 'vpnn_lr%f_masking_layer_layer%d_num_hidden%d' % (Config.lr, Config.num_layers, Config.num_hidden)
+model_name = 'vpnn_lr%f_masking_layer_layer%d_num_hidden%d_reg%f' % (Config.lr, Config.num_layers, Config.num_hidden, Config.l2_lambda)
 
 def read_and_decode(filename_queue):
     reader = tf.TFRecordReader()

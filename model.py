@@ -86,6 +86,7 @@ class SeparationModel():
         masked_loss = tf.abs(self.soft_masked_output) - real_target
         self.masked_loss = Config.l2_lambda * l2_cost + tf.reduce_mean(tf.pow(masked_loss, 2))
         tf.summary.scalar('masked_loss', self.masked_loss)
+        tf.summary.scalar('regularization_cost', Config.l2_lambda * l2_cost)
 
 
     def add_training_op(self):

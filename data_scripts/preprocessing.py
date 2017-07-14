@@ -16,8 +16,9 @@ TRAIN_DIR = os.path.join(DATA_DIR, 'train')
 TEST_DIR = os.path.join(DATA_DIR, 'test')
 
 PREPROCESSING_STAT_DIR = os.path.join(DATA_DIR, 'preprocessing_stat')
-TRAINING_DATA = 200
-
+TRAIN_FILES = set(['21031','54186','71711','71710','31126','10171','10164','54211','31116','21038','31083','31118',
+'31081','45393','80612','21069','21075','21064','21060','21061','54202','45412','45406','31092','45418','45431',
+'54251','54243','54246','54247','66564','31112','61673','66556','54221'])
 
 def _bytes_feature(value):
   return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
@@ -26,8 +27,6 @@ if __name__ == '__main__':
 
 	for i, f in enumerate(os.listdir(INPUT_DIR)):
 		if f[-4:] == '.wav':
-			if i < TRAINING_DATA:
-				continue
 			print i
 			filename = os.path.join(INPUT_DIR, f)
 			data, rate = librosa.load(filename, mono=False)
@@ -46,16 +45,16 @@ if __name__ == '__main__':
 
 			output_dir = None
 			print song_spec.shape
-			if i < TRAINING_DATA:
+			if f[:5] in TRAIN_FILES:
 				output_dir = TRAIN_DIR
-				pass
+				print 'Train'
 			else:
 				output_dir = TEST_DIR
+				print 'Test'
 
 			writer_filename = os.path.join(output_dir, '%s.tfrecords' % f[:-4])
 			writer = tf.python_io.TFRecordWriter(writer_filename)
 
-			for i in 
 			example = tf.train.Example(features=tf.train.Features(feature={
 				'song_spec': _bytes_feature(song_spec.tostring()),
 				'voice_spec': _bytes_feature(voice_spec.tostring()),
