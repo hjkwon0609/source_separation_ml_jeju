@@ -13,28 +13,18 @@ def create_spectrogram_from_audio(data):
 
 	# divide the real and imaginary components of each element 
 	# concatenate the matrix with the real components and the matrix with imaginary components
+	# (DataCorruptionError when saving complex numbers in TFRecords)
 	concatenated = np.concatenate([np.real(spectrogram), np.imag(spectrogram)], axis=1)
-	print concatenated.shape
 	return concatenated
 
 def create_audio_from_spectrogram(spec):
-	# reconstruct complex number from real and imaginary components
-	spec_transposed = np.transpose(spec.eval())
-	return stft.istft(spec_transposed, hop_length)
+	spec_transposed = tf.transpose(spec).eval()
+	print spec_transposed.shape
+	return librosa.istft(spec_transposed, Config.hop_length)
 
 ############################################################################
 ##  Vector Product Functions
 ############################################################################
-
-# def tf_broadcast_matrix_mult(a, b):
-# 	'''
-# 	a is 3-d and b is 2-d
-# 	'''
-# 	orig_shape = a.get_shape().as_list()
-# 	a_ = tf.reshape(a, [-1, orig_shape[-1]])
-# 	mul = tf.matmul(a_, b)
-# 	new_shape = orig_shape[:-1] + b.get_shape().as_list()[-1:]
-# 	return tf.reshape(mul, new_shape)
 
 def vector_product_matrix(X, W):
 	return tf.transpose([tf.matmul(X[:,:,1], W[:,:,2]) - tf.matmul(X[:,:,2], W[:,:,1]),

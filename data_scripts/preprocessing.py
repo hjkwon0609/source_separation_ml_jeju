@@ -26,6 +26,8 @@ if __name__ == '__main__':
 
 	for i, f in enumerate(os.listdir(INPUT_DIR)):
 		if f[-4:] == '.wav':
+			if i < TRAINING_DATA:
+				continue
 			print i
 			filename = os.path.join(INPUT_DIR, f)
 			data, rate = librosa.load(filename, mono=False)
@@ -46,12 +48,14 @@ if __name__ == '__main__':
 			print song_spec.shape
 			if i < TRAINING_DATA:
 				output_dir = TRAIN_DIR
+				pass
 			else:
 				output_dir = TEST_DIR
 
 			writer_filename = os.path.join(output_dir, '%s.tfrecords' % f[:-4])
 			writer = tf.python_io.TFRecordWriter(writer_filename)
 
+			for i in 
 			example = tf.train.Example(features=tf.train.Features(feature={
 				'song_spec': _bytes_feature(song_spec.tostring()),
 				'voice_spec': _bytes_feature(voice_spec.tostring()),
@@ -60,11 +64,6 @@ if __name__ == '__main__':
 
 			writer.write(example.SerializeToString())
 			writer.close()
-
-	# np.save(os.path.join(PREPROCESSING_STAT_DIR, 'per_freq_stats'),
-	# 	[np.mean(mixed_specs,axis=0), np.var(mixed_specs,axis=0), np.mean(song_specs,axis=0), np.var(song_specs,axis=0), np.mean(voice_specs,axis=0), np.var(voice_specs,axis=0)])
-	# np.save(os.path.join(PREPROCESSING_STAT_DIR, 'total_stats'),
-	# 	[np.mean(mixed_specs,axis=0), np.var(mixed_specs,axis=0), np.mean(song_specs,axis=0), np.var(song_specs,axis=0), np.mean(voice_specs,axis=0), np.var(voice_specs,axis=0)])
 
 
 

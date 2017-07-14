@@ -3,3 +3,4 @@ data/*
 tensorboard/*
 checkpoints/*
 *ipynb*
+*.sh
