@@ -15,7 +15,7 @@ class Config:
     num_layers = 3
 
     num_epochs = 5000
-    l2_lambda = 0.1
+    l2_lambda = 0
     lr = 0.00025
     beta1 = 0.9
     beta2 = 0.999

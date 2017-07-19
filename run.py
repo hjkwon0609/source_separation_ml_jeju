@@ -48,11 +48,6 @@ def read_and_decode(filename_queue):
 
     target_spec = tf.concat([song_spec, voice_spec], axis=1) # target spec is going to be a concatenation of song_spec and voice_spec
 
-    # reshape so each frame becomes one example, instead of each song being an example
-    # input: [freq_bins, freq_bins, 3] ==> [num_frames, freq_bins, 3]
-    # input_shape = input_spec.get_shape().as_list()
-    # input_spec = tf.reshape(input_spec, [-1, input_shape[1], input_shape[2]])
-
     return input_spec, target_spec
 
 
@@ -82,8 +77,8 @@ def stack_spectrograms(spec):
 
 
 def prepare_data(train):
-    # data_dir = TRAIN_DIR if train else TEST_DIR
-    data_dir = TRAIN_DIR
+    data_dir = TRAIN_DIR if train else TEST_DIR
+    # data_dir = TRAIN_DIR
     files = sorted([os.path.join(data_dir, f) for f in os.listdir(data_dir) if f[-10:] == '.tfrecords'])
     # filename = ['10161_chorus.tfrecords', '10161_verse.tfrecords', '10164_chorus.tfrecords', '10170_chorus.tfrecords']
     # files = [os.path.join(data_dir, f) for f in filename]
@@ -241,6 +236,7 @@ def model_test():
                     soft_gnsdr, soft_gsir, soft_gsar = bss_eval_global(mixed_audio, song_target_audio, voice_target_audio, soft_song_masked_audio, soft_voice_masked_audio)
 
                     # masked_results.append([soft_sdr[0], soft_sdr[1], soft_sir[0], soft_sir[1], soft_sar[0],soft_sar[1]])
+                    print(soft_gnsdr[0], soft_gnsdr[1], soft_gsir[0], soft_gsir[1], soft_gsar[0], soft_gsar[1])
                     soft_masked_results.append([soft_gnsdr[0], soft_gnsdr[1], soft_gsir[0], soft_gsir[1], soft_gsar[0], soft_gsar[1]])
 
             except tf.errors.OutOfRangeError:

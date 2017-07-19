@@ -19,7 +19,6 @@ def create_spectrogram_from_audio(data):
 
 def create_audio_from_spectrogram(spec):
 	spec_transposed = tf.transpose(spec).eval()
-	print spec_transposed.shape
 	return librosa.istft(spec_transposed, Config.hop_length)
 
 def apply_mask(spec, mask):

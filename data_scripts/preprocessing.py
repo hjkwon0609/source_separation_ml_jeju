@@ -16,18 +16,23 @@ TRAIN_DIR = os.path.join(DATA_DIR, 'train')
 TEST_DIR = os.path.join(DATA_DIR, 'test')
 
 PREPROCESSING_STAT_DIR = os.path.join(DATA_DIR, 'preprocessing_stat')
-TRAIN_FILES = set(['21031','54186','71711','71710','31126','10171','10164','54211','31116','21038','31083','31118',
-'31081','45393','80612','21069','21075','21064','21060','21061','54202','45412','45406','31092','45418','45431',
-'54251','54243','54246','54247','66564','31112','61673','66556','54221'])
+TRAIN_FILES = set(['45381_chorus.wav','45391_verse.wav','66556_verse.wav','54219_verse.wav','54211_chorus.wav','54243_verse.wav','54186_verse.wav','54242_verse.wav','31112_chorus.wav','45406_chorus.wav','21069_verse.wav','31134_verse.wav','31126_chorus.wav','45389_chorus.wav','31099_verse.wav','66566_verse.wav','31100_chorus.wav','31116_chorus.wav','21064_verse.wav','21061_verse.wav','45435_chorus.wav','21068_verse.wav','45412_chorus.wav','10161_chorus.wav','45393_verse.wav','45387_verse.wav','45390_verse.wav','31143_chorus.wav','45435_verse.wav','21071_verse.wav','45421_verse.wav','21032_verse.wav','21073_chorus.wav','21062_verse.wav','21061_chorus.wav','71719_chorus.wav','45398_verse.wav','31109_chorus.wav','66559_chorus.wav','21031_verse.wav','31092_chorus.wav','45382_verse.wav','54236_chorus.wav','31092_verse.wav','66560_verse.wav','90586_verse.wav','54246_chorus.wav','45378_verse.wav','21038_chorus.wav','21038_verse.wav','31083_chorus.wav','54205_verse.wav','54243_chorus.wav','45422_chorus.wav','21075_chorus.wav','31083_verse.wav','54227_verse.wav','31081_verse.wav','45382_chorus.wav','31139_verse.wav','45423_verse.wav','31075_chorus.wav','21075_verse.wav','21060_verse.wav','61671_chorus.wav','45418_verse.wav','45381_verse.wav','45429_verse.wav','31143_verse.wav'])
 
-def _bytes_feature(value):
-  return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
+def _bytes_feature(value): return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
 
 if __name__ == '__main__':
 
 	for i, f in enumerate(os.listdir(INPUT_DIR)):
 		if f[-4:] == '.wav':
 			print i
+			output_dir = None
+			if f in TRAIN_FILES:
+				output_dir = TRAIN_DIR
+				print 'Train'
+			else:
+				output_dir = TEST_DIR
+				print 'Test'
+
 			filename = os.path.join(INPUT_DIR, f)
 			data, rate = librosa.load(filename, mono=False)
 
@@ -43,14 +48,7 @@ if __name__ == '__main__':
 												create_spectrogram_from_audio(voice), \
 												create_spectrogram_from_audio(mixed)
 
-			output_dir = None
-			print song_spec.shape
-			if f[:5] in TRAIN_FILES:
-				output_dir = TRAIN_DIR
-				print 'Train'
-			else:
-				output_dir = TEST_DIR
-				print 'Test'
+
 
 			writer_filename = os.path.join(output_dir, '%s.tfrecords' % f[:-4])
 			writer = tf.python_io.TFRecordWriter(writer_filename)
