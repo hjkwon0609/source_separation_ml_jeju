@@ -21,17 +21,12 @@ TRAIN_FILES = set(['45381_chorus.wav','45391_verse.wav','66556_verse.wav','54219
 def _bytes_feature(value): return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
 
 if __name__ == '__main__':
+	train_spectrograms = []
+	j = 0
 
 	for i, f in enumerate(os.listdir(INPUT_DIR)):
 		if f[-4:] == '.wav':
 			print i
-			output_dir = None
-			if f in TRAIN_FILES:
-				output_dir = TRAIN_DIR
-				print 'Train'
-			else:
-				output_dir = TEST_DIR
-				print 'Test'
 
 			filename = os.path.join(INPUT_DIR, f)
 			data, rate = librosa.load(filename, mono=False)
@@ -48,7 +43,17 @@ if __name__ == '__main__':
 												create_spectrogram_from_audio(voice), \
 												create_spectrogram_from_audio(mixed)
 
+			if f in TRAIN_FILES:
+				output_dir = TRAIN_DIR
+				train_spectrograms.append([np.abs(song_spec), np.abs(voice_spec), np.abs(mixed_spec)])
+				print 'Train'
+			else:
+				output_dir = TEST_DIR
+				print 'Test'
 
+			song_spec, voice_spec, mixed_spec = spectrogram_split_real_imag(song_spec), \
+												spectrogram_split_real_imag(voice_spec), \
+												spectrogram_split_real_imag(mixed_spec)
 
 			writer_filename = os.path.join(output_dir, '%s.tfrecords' % f[:-4])
 			writer = tf.python_io.TFRecordWriter(writer_filename)
@@ -62,12 +67,10 @@ if __name__ == '__main__':
 			writer.write(example.SerializeToString())
 			writer.close()
 
-
-
-
-			
-			
-
-
-
-
+	train_spectrograms = np.asarray(train_spectrograms)
+	print(train_spectrograms.shape)
+	means = np.mean(train_spectrograms, axis=(0,2))
+	std = np.std(train_spectrograms, axis=(0,2))
+	print(means.shape)
+	print(std.shape)
+	np.save(os.path.join(PREPROCESSING_STAT_DIR, 'stats'), [means, std])
