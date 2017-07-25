@@ -111,7 +111,9 @@ def model_train(freq_weighted):
     with tf.Graph().as_default():
         
         train_inputs, train_targets = prepare_data(True)
-        model = SeparationModel(freq_weighted=False)  # don't use freq_weighted for now
+        stats = np.load(PREPROCESSING_STATS)
+
+        model = SeparationModel(stats=stats, freq_weighted=False)  # don't use freq_weighted for now
         model.run_on_batch(train_inputs, train_targets)
         
         init = tf.group(tf.initialize_all_variables(), tf.initialize_local_variables())
@@ -167,8 +169,9 @@ def model_train(freq_weighted):
 def model_test():
     with tf.Graph().as_default():
         train_inputs, train_targets = prepare_data(False)
+        stats = np.load(PREPROCESSING_STATS)
             
-        model = SeparationModel(freq_weighted=False)  # don't use freq_weighted for now
+        model = SeparationModel(stats=stats, freq_weighted=False)  # don't use freq_weighted for now
 
         model.run_on_batch(train_inputs, train_targets)
         print(train_inputs.get_shape())
@@ -211,9 +214,19 @@ def model_test():
                     print('Step %d: loss = %.5f masked_loss = %.5f (%.3f sec)' % (step_ii, batch_cost, masked_loss, duration))
 
                     soft_song_masked, soft_voice_masked = tf.split(soft_masked_output, [Config.num_freq_bins, Config.num_freq_bins], axis=1)
+                    soft_song_masked *= stats[1][0]
+                    soft_song_masked += stats[0][0]
+                    soft_voice_masked *= stats[1][1]
+                    soft_voice_masked += stats[0][1]
                     song_target, voice_target = tf.split(target, [Config.num_freq_bins, Config.num_freq_bins], axis=1)
+                    song_target *= stats[1][0]
+                    song_target += stats[0][0]
+                    voice_target *= stats[1][1]
+                    voice_target += stats[0][1]
 
                     mixed_spec = mixed_spec[:,:,1]
+                    mixed_spec *= stats[1][2]
+                    mixed_spec += stats[0][2]
 
                     result_wav_dir = 'data/results'
 
