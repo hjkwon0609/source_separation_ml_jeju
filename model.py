@@ -46,6 +46,9 @@ class SeparationModel():
         print(input_spec.get_shape())
         curr = tf.abs(self.input)  # only use magnitude for training
 
+        curr -= stats[0][2]  # subtract by mean of each frequency bin
+        curr /= stats[1][2]  # divide by std of each frequency bin
+
         activation_fn = tf.nn.relu if Config.use_relu else tf.nn.sigmoid
         for i in xrange(Config.num_layers):
             layer_name = 'hidden%d' % (i + 1)    
@@ -74,6 +77,15 @@ class SeparationModel():
         self.target = target  # for outputting later
         real_target = tf.abs(self.target)
 
+        mean = tf.concat([stats[0][0], stats[0][1]])
+        stdev = tf.concat([stats[1][0], stats[1][1]])
+
+        print(mean.get_shape())
+        print(stdev.get_shape())
+
+        real_target -= mean
+        real_target /= stdev
+
         delta = self.output - real_target 
         squared_error = tf.reduce_mean(tf.pow(delta, 2)) 
 
@@ -92,8 +104,6 @@ class SeparationModel():
     def add_training_op(self):
         optimizer = tf.train.AdamOptimizer(learning_rate=Config.lr, beta1=Config.beta1, beta2=Config.beta2)
         grads = optimizer.compute_gradients(self.masked_loss) if Config.use_mask_loss else optimizer.compute_gradients(self.loss)
-        # for grad, var in grads:
-        #     tf.summary.histogram('gradient_norm_%s' % (var), grad)
         self.optimizer = optimizer.apply_gradients(grads, global_step=self.global_step)
 
 
@@ -115,5 +125,6 @@ class SeparationModel():
         train_first_batch_preds = session.run(self.decoded_sequence, feed_dict=train_feed)
         compare_predicted_to_true(train_first_batch_preds, train_targets_batch)        
 
-    def __init__(self, freq_weighted=None):
+    def __init__(self, stats, freq_weighted=None):
+        self.stats = stats
         pass

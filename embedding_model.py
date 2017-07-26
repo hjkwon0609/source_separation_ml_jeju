@@ -41,59 +41,99 @@ class SeparationModel():
     def add_prediction_op(self, input_spec):
         self.input = input_spec
         curr = tf.abs(self.input)  # use real component for training
+        print('input shape: %s' % (str(curr.get_shape())))
+        if EmbeddingConfig.use_vpnn:
+            curr = tf.transpose(curr, [2, 0, 1])
+            curr -= self.stats[0][2]
+            curr /= self.stats[1][2]
+            curr = tf.transpose(curr, [1, 2, 0])
+        else:
+            curr -= self.stats[0][2]  # subtract mean for each freq bin
+            curr /= self.stats[1][2]  # divide by variance of mixed
 
-        activation_fn = tf.nn.sigmoid
-        for i in xrange(EmbeddingConfig.num_layers):
-            layer_name = 'hidden%d' % (i + 1)
-            curr = self.create_layer(layer_name, curr, EmbeddingConfig.num_hidden, activation_fn)
+        activation_fn = tf.nn.tanh
+        # initializer = tf.contrib.layers.xavier_initializer()
+        initializer = tf.truncated_normal_initializer(stddev=0.0001)
 
-        curr_frame = curr[:,:,1]
+        if EmbeddingConfig.use_vpnn:
+            for i in xrange(EmbeddingConfig.num_layers):
+                layer_name = 'hidden%d' % (i + 1)
+                curr = self.create_layer(layer_name, curr, EmbeddingConfig.num_hidden, activation_fn)
+            curr_frame = curr[:,:,1]
+        else:
+            if EmbeddingConfig.use_gru:
+                cell_fw = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.GRUCell(EmbeddingConfig.num_hidden, kernel_initializer=initializer), output_keep_prob=EmbeddingConfig.keep_prob) for _ in xrange(EmbeddingConfig.num_layers)])
+                cell_bw = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.GRUCell(EmbeddingConfig.num_hidden, kernel_initializer=initializer), output_keep_prob=EmbeddingConfig.keep_prob) for _ in xrange(EmbeddingConfig.num_layers)])
+            else:
+                cell_fw = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.LSTMCell(EmbeddingConfig.num_hidden, initializer=initializer), output_keep_prob=EmbeddingConfig.keep_prob) for _ in xrange(EmbeddingConfig.num_layers)])
+                cell_bw = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.LSTMCell(EmbeddingConfig.num_hidden, initializer=initializer), output_keep_prob=EmbeddingConfig.keep_prob) for _ in xrange(EmbeddingConfig.num_layers)])
+
+            output, state = tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, curr, dtype=tf.float32)
+            fw_output, bw_output = output
+            final_output = tf.concat([fw_output, bw_output], axis=2)
+            curr_frame = tf.reshape(final_output, [-1, EmbeddingConfig.num_hidden * 2])
+
         embedding_list = []
         for i in xrange(EmbeddingConfig.num_freq_bins):
-            embedding = tf.layers.dense(curr_frame, EmbeddingConfig.embedding_dim, tf.nn.tanh)
-            
+            embedding = tf.layers.dense(curr_frame, EmbeddingConfig.embedding_dim, activation_fn, kernel_initializer=initializer)
             # unit norm
-            embedding = tf.divide(embedding, tf.norm(embedding, axis=1, keep_dims=True))
+            embedding = tf.divide(embedding, tf.norm(embedding, ord=2, axis=1, keep_dims=True) + 1e-6)
+            # embedding = tf.divide(embedding, tf.reduce_max(embedding, axis=1, keep_dims=True) + 1e-10)
             embedding_list.append(embedding)
 
         self.embedding = tf.transpose(tf.stack(embedding_list), [1, 0, 2])  # shape: [batch_size, frequency bins, embedding dim]  
 
-
     def add_loss_op(self, voice_spec, song_spec):
+        if not EmbeddingConfig.use_vpnn:
+            # concatenate all batches into one axis  [num_batches * time_frames, freq_bins]
+            voice_spec = tf.reshape(voice_spec, [-1, EmbeddingConfig.num_freq_bins])
+            song_spec = tf.reshape(song_spec, [-1, EmbeddingConfig.num_freq_bins])
+
+        self.voice_spec = voice_spec  # for output
+        self.song_spec = song_spec
+
         song_spec_mask = tf.cast(tf.abs(song_spec) > tf.abs(voice_spec), tf.float32)
         voice_spec_mask =  tf.ones(song_spec_mask.get_shape()) - song_spec_mask
 
         V = self.embedding
         Y = tf.transpose([song_spec_mask, voice_spec_mask], [1, 2, 0])  # [num_batch, num_freq_bins, 2]
 
-        # D = diag(Y Y^T 1)
-        D = tf.matrix_diag(tf.squeeze(tf.matmul(tf.matmul(Y, tf.transpose(Y, [0, 2, 1])), tf.ones([EmbeddingConfig.batch_size, EmbeddingConfig.num_freq_bins, 1], tf.float32))))
-        # D_inv_sqrt: D^(-1/2)
-        D_inv_sqrt = tf.sqrt(tf.matrix_inverse(D))
+        A_pred = tf.matmul(V, tf.transpose(V, [0, 2, 1]))
+        A_target = tf.matmul(Y, tf.transpose(Y, [0, 2, 1]))
+        error = tf.reduce_mean(tf.square(A_pred - A_target))  # average error per TF bin
 
-        # cost = Frobenius|(V^T D^(-1/2) V)|^2 - 2 * Frobenius|(V^T D^(-1/2) Y)|^2 + Frobenius|(Y^T D^(-1/2) Y)|^2
-        error = tf.reduce_sum(tf.square(tf.matmul(tf.matmul(tf.transpose(V, [0, 2, 1]), D_inv_sqrt), V))) + \
-                    tf.reduce_sum(tf.square(tf.matmul(tf.matmul(tf.transpose(V, [0, 2, 1]), D_inv_sqrt), Y))) + \
-                    tf.reduce_sum(tf.square(tf.matmul(tf.matmul(tf.transpose(V, [0, 2, 1]), D_inv_sqrt), Y)))
+        tf.summary.histogram('a_same cluster embedding distribution', A_pred * A_target)
+        # tf.summary.histogram('a_different cluster embedding distribution', A_pred * (1 - A_target))
 
-        average_error = error / V.get_shape().as_list()[0]
+        tf.summary.histogram('V', V)
+        tf.summary.histogram('V V^T', A_pred)
 
-        l2_cost = tf.reduce_sum([tf.norm(v) for v in tf.trainable_variables() if len(v.get_shape().as_list()) == 3])
+        l2_cost = tf.reduce_sum([tf.norm(v) for v in tf.trainable_variables() if len(v.get_shape().as_list()) == 2])
 
-        self.loss = EmbeddingConfig.l2_lambda * l2_cost + average_error
+        self.loss = EmbeddingConfig.l2_lambda * l2_cost + error
         
-        tf.summary.scalar("loss", self.loss)
+        tf.summary.scalar("avg_loss", self.loss)
+        tf.summary.scalar('regularizer cost', EmbeddingConfig.l2_lambda * l2_cost)
 
     def add_training_op(self):
+        # learning_rate = tf.train.exponential_decay(EmbeddingConfig.lr, self.global_step, 50, 0.96)
         optimizer = tf.train.AdamOptimizer(learning_rate=EmbeddingConfig.lr, beta1=EmbeddingConfig.beta1, beta2=EmbeddingConfig.beta2)
-        # optimizer = tf.train.GradientDescentOptimizer(learning_rate=EmbeddingConfig.lr)
+        # optimizer = tf.train.MomentumOptimizer(learning_rate=EmbeddingConfig.lr, momentum=0.9)
+        # optimizer = tf.train.RMSPropOptimizer(learning_rate=EmbeddingConfig.lr, epsilon=1e-6)
         grads = optimizer.compute_gradients(self.loss)
+        grads = [(tf.clip_by_norm(grad, 100000), var) for grad, var in grads if grad is not None]
+        # grads = [(grad + tf.random_normal(shape=grad.get_shape(), stddev=0.6), var) for grad, var in grads if grad is not None]
         for grad, var in grads:
-            tf.summary.histogram('gradient_norm_%s' % (var), grad)
+            if grad is not None:
+                tf.summary.scalar('gradient_%s' % (var), tf.norm(grad))
+                # tf.summary.histogram('gradient_%s' % (var), grad)
         self.optimizer = optimizer.apply_gradients(grads, global_step=self.global_step)
 
 
     def add_summary_op(self):
+        for v in tf.global_variables():
+            if len(v.get_shape().as_list()) != 0 and ('lstm' in v.name or 'gru' in v.name):
+                tf.summary.histogram(v.name, v)
         self.merged_summary_op = tf.summary.merge_all()
 
 
@@ -105,11 +145,5 @@ class SeparationModel():
         self.add_training_op()
         self.add_summary_op()
 
-
-    def print_results(self, train_inputs_batch, train_targets_batch):
-        train_feed = self.create_feed_dict(train_inputs_batch, train_targets_batch)
-        train_first_batch_preds = session.run(self.decoded_sequence, feed_dict=train_feed)
-        compare_predicted_to_true(train_first_batch_preds, train_targets_batch)        
-
-    def __init__(self, freq_weighted=None):
-        pass
+    def __init__(self, stats, freq_weighted=None):
+        self.stats = stats  # stats for normalizing input

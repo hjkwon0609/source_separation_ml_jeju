@@ -5,7 +5,7 @@ import numpy as np
 import h5py
 import sys
 import tensorflow as tf
-# import librosa
+import librosa
 
 sys.path.insert(1, os.path.join(sys.path[0], '..'))
 from util import *
@@ -29,7 +29,7 @@ if __name__ == '__main__':
 			print i
 
 			filename = os.path.join(INPUT_DIR, f)
-			data, rate = librosa.load(filename, mono=False)
+			data, rate = librosa.load(filename, mono=False, sr=44100)
 
 			song = data[0,:]
 			voice = data[1,:]

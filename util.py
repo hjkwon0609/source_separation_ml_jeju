@@ -14,8 +14,13 @@ def create_spectrogram_from_audio(data):
 	# divide the real and imaginary components of each element 
 	# concatenate the matrix with the real components and the matrix with imaginary components
 	# (DataCorruptionError when saving complex numbers in TFRecords)
-	concatenated = np.concatenate([np.real(spectrogram), np.imag(spectrogram)], axis=1)
-	return concatenated
+	
+	# concatenated = np.concatenate([np.real(spectrogram), np.imag(spectrogram)], axis=1)
+	return spectrogram # [num_time_frames, num_freq_bins]
+
+def spectrogram_split_real_imag(spec):
+	return np.concatenate([np.real(spec), np.imag(spec)], axis=1)
+
 
 def create_audio_from_spectrogram(spec):
 	spec_transposed = tf.transpose(spec).eval()
