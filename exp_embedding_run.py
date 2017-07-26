@@ -15,11 +15,11 @@ from scipy.io import wavfile
 import pdb
 from time import gmtime, strftime
 
-from embedding_config import EmbeddingConfig
+from exp_embedding_config import EmbeddingConfig
 from embedding_model import SeparationModel
 import h5py
 
-from scipy.cluster.vq import kmeans, whiten
+from scipy.cluster.vq import whiten
 from sklearn.cluster import KMeans
 
 from evaluate import bss_eval_sources
@@ -32,7 +32,7 @@ from util import *
 
 from tensorflow.contrib.tensorboard.plugins import projector
 
-TRAIN_DIR = 'data/train'
+TRAIN_DIR = 'data/experiment_test'
 TEST_DIR = 'data/test'
 PREPROCESSING_STATS = 'data/preprocessing_stat/stats.npy'
 
@@ -60,14 +60,11 @@ def read_and_decode(filename_queue, train):
         return stacked_mixed_spec, voice_spec, song_spec
     else:
         # create shorter segments for lstm
-        if train:
-            song_specs = tf.stack(tf.split(song_spec, num_or_size_splits=EmbeddingConfig.num_segments, axis=0))
-            voice_specs = tf.stack(tf.split(voice_spec, num_or_size_splits=EmbeddingConfig.num_segments, axis=0))
-            mixed_specs = tf.stack(tf.split(mixed_spec, num_or_size_splits=EmbeddingConfig.num_segments, axis=0))
+        # song_specs = tf.stack(tf.split(song_spec, num_or_size_splits=EmbeddingConfig.num_segments, axis=0))
+        # voice_specs = tf.stack(tf.split(voice_spec, num_or_size_splits=EmbeddingConfig.num_segments, axis=0))
+        # mixed_specs = tf.stack(tf.split(mixed_spec, num_or_size_splits=EmbeddingConfig.num_segments, axis=0))
 
-            return mixed_specs, voice_specs, song_specs
-        else:
-            return mixed_spec, voice_spec, song_spec
+        return mixed_spec, voice_spec, song_spec
 
 def transform_spec_from_raw(raw):
     '''
@@ -93,10 +90,9 @@ def stack_spectrograms(spec):
     return padding_removed
 
 def prepare_data(train):
-    data_dir = TRAIN_DIR if train else TEST_DIR
-    # data_dir = TRAIN_DIR
+    # data_dir = TRAIN_DIR if train else TEST_DIR
+    data_dir = TRAIN_DIR
     files = sorted([os.path.join(data_dir, f) for f in os.listdir(data_dir) if f[-10:] == '.tfrecords'])
-    files = files[:80]
 
     with tf.name_scope('input'):
         num_epochs = EmbeddingConfig.num_epochs if train else 1
@@ -228,46 +224,51 @@ def model_test():
                     duration = time.time() - start
                     print('Step %d: loss = %.5f (%.3f sec)' % (step_ii, batch_cost, duration))
 
+                    print(embedding.shape)
                     embedding = np.reshape(embedding, [-1, EmbeddingConfig.embedding_dim]).astype(np.float64)
 
-                    k = 2
+                    k = 3
+
+                    np.savez(os.path.join(EMBEDDING_RESULT_DIR, 'embedding%d' % (step_ii)), embedding)
+                    np.savez(os.path.join(EMBEDDING_RESULT_DIR, 'mixed%d' % (step_ii)), mixed_spec)
 
                     whitened_embedding = whiten(embedding)
                     kmeans = KMeans(n_clusters=k).fit(whitened_embedding)
 
                     labels = np.reshape(kmeans.labels_, [-1, EmbeddingConfig.num_freq_bins])
+                    print(labels.shape)
+                    print(labels)
 
                     step_ii += 1
-                    duration = time.time() - start
+                    # duration = time.time() - start
 
-                    mixed_spec = tf.squeeze(mixed_spec)
+                    # mixed_spec = tf.squeeze(mixed_spec)
 
-                    mixed_audio = create_audio_from_spectrogram(mixed_spec)
-                    song_target_audio = create_audio_from_spectrogram(song_spec)
-                    voice_target_audio = create_audio_from_spectrogram(voice_spec)
+                    # mixed_audio = create_audio_from_spectrogram(mixed_spec)
+                    # song_target_audio = create_audio_from_spectrogram(song_spec)
+                    # voice_target_audio = create_audio_from_spectrogram(voice_spec)
 
-                    result_wav_dir = 'data/results'
+                    # result_wav_dir = 'data/results'
 
-                    writeWav(os.path.join(result_wav_dir, 'song_target_%d.wav' % (step_ii)), 16000, song_target_audio)
-                    writeWav(os.path.join(result_wav_dir, 'voice_target_%d.wav' % (step_ii)), 16000, voice_target_audio)                    
+                    # writeWav(os.path.join(result_wav_dir, 'song_target_%d.wav' % (step_ii)), 16000, song_target_audio)
+                    # writeWav(os.path.join(result_wav_dir, 'voice_target_%d.wav' % (step_ii)), 16000, voice_target_audio)                    
 
                     
-                    src_audios = []
-                    for i in xrange(k):
-                        src_mask = np.equal(labels, i).astype(np.int8)
-                        src_spec = apply_mask(mixed_spec, src_mask)
+                    # for i in xrange(k):
+                    #     src_mask = np.equal(labels, i).astype(np.int8)
+                    #     src_spec = apply_mask(mixed_spec, src_mask)
 
-                        src_audio = create_audio_from_spectrogram(src_spec)
-                        writeWav(os.path.join(result_wav_dir, 'src%d_%d.wav' % (i, step_ii)), 16000, src_audio)
-                        src_audios.append(src_audio)
+                    #     src_audio = create_audio_from_spectrogram(src_spec)
+                    #     writeWav(os.path.join(result_wav_dir, 'src%d_%d.wav' % (i, step_ii)), 16000, src_audio)
 
 
-                    soft_gnsdr, soft_gsir, soft_gsar = bss_eval_global(mixed_audio, song_target_audio, voice_target_audio, src_audios[0], src_audios[1])
-                    results.append([soft_gnsdr[0], soft_gnsdr[1], soft_gsir[0], soft_gsir[1], soft_gsar[0], soft_gsar[1]])
+                    # soft_gnsdr, soft_gsir, soft_gsar = bss_eval_global(mixed_audio, song_target_audio, voice_target_audio, src1_audio, src2_audio)
+                    # results.append([soft_gnsdr[0], soft_gnsdr[1], soft_gsir[0], soft_gsir[1], soft_gsar[0], soft_gsar[1]])
 
             except tf.errors.OutOfRangeError:
-                results = np.asarray(results)
-                np.save('/data/results/results', results)
+                # results = np.asarray(results)
+                # print(np.mean(results, axis=1))
+                print('Done')
             finally:
                 coord.request_stop()
 

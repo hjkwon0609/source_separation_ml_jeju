@@ -98,22 +98,22 @@ class SeparationModel():
         V = self.embedding
         Y = tf.transpose([song_spec_mask, voice_spec_mask], [1, 2, 0])  # [num_batch, num_freq_bins, 2]
 
-        A_pred = tf.matmul(V, tf.transpose(V, [0, 2, 1]))
-        A_target = tf.matmul(Y, tf.transpose(Y, [0, 2, 1]))
-        error = tf.reduce_mean(tf.square(A_pred - A_target))  # average error per TF bin
+        # A_pred = tf.matmul(V, tf.transpose(V, [0, 2, 1]))
+        # A_target = tf.matmul(Y, tf.transpose(Y, [0, 2, 1]))
+        error = tf.reduce_mean(tf.square(tf.matmul(V, tf.transpose(V, [0, 2, 1])) - tf.matmul(Y, tf.transpose(Y, [0, 2, 1]))))  # average error per TF bin
 
-        tf.summary.histogram('a_same cluster embedding distribution', A_pred * A_target)
+        # tf.summary.histogram('a_same cluster embedding distribution', A_pred * A_target)
         # tf.summary.histogram('a_different cluster embedding distribution', A_pred * (1 - A_target))
 
-        tf.summary.histogram('V', V)
-        tf.summary.histogram('V V^T', A_pred)
+        # tf.summary.histogram('V', V)
+        # tf.summary.histogram('V V^T', A_pred)
 
         l2_cost = tf.reduce_sum([tf.norm(v) for v in tf.trainable_variables() if len(v.get_shape().as_list()) == 2])
 
         self.loss = EmbeddingConfig.l2_lambda * l2_cost + error
         
-        tf.summary.scalar("avg_loss", self.loss)
-        tf.summary.scalar('regularizer cost', EmbeddingConfig.l2_lambda * l2_cost)
+        # tf.summary.scalar("avg_loss", self.loss)
+        # tf.summary.scalar('regularizer cost', EmbeddingConfig.l2_lambda * l2_cost)
 
     def add_training_op(self):
         # learning_rate = tf.train.exponential_decay(EmbeddingConfig.lr, self.global_step, 50, 0.96)
@@ -123,17 +123,17 @@ class SeparationModel():
         grads = optimizer.compute_gradients(self.loss)
         grads = [(tf.clip_by_norm(grad, 100000), var) for grad, var in grads if grad is not None]
         # grads = [(grad + tf.random_normal(shape=grad.get_shape(), stddev=0.6), var) for grad, var in grads if grad is not None]
-        for grad, var in grads:
-            if grad is not None:
-                tf.summary.scalar('gradient_%s' % (var), tf.norm(grad))
+        # for grad, var in grads:
+            # if grad is not None:
+                # tf.summary.scalar('gradient_%s' % (var), tf.norm(grad))
                 # tf.summary.histogram('gradient_%s' % (var), grad)
         self.optimizer = optimizer.apply_gradients(grads, global_step=self.global_step)
 
 
     def add_summary_op(self):
-        for v in tf.global_variables():
-            if len(v.get_shape().as_list()) != 0 and ('lstm' in v.name or 'gru' in v.name):
-                tf.summary.histogram(v.name, v)
+        # for v in tf.global_variables():
+            # if len(v.get_shape().as_list()) != 0 and ('lstm' in v.name or 'gru' in v.name):
+                # tf.summary.histogram(v.name, v)
         self.merged_summary_op = tf.summary.merge_all()
 
 
